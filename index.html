@@ -1,1 +1,67 @@
-<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Inventory Review</title><link rel="stylesheet" href="style.css"><main><h1>Clover → Toast inventory review</h1><p>Local CSV review. No files are uploaded. Existing categories are preserved. Manufacturer and invoice verification are not implemented yet.</p><input id="file" type="file" accept=".csv"><button id="load">Load CSV</button><button id="save" disabled>Download reviewed CSV</button><p id="status" role="status"></p><div class="scroll"><table><thead><tr><th>Original name</th><th>Reviewed name</th><th>Barcode</th><th>Existing category</th><th>Review flags</th></tr></thead><tbody id="rows"></tbody></table></div></main><script src="app.js"></script></html>
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Inventory Identity Review</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main>
+    <h1>Clover → Toast conservative identity review</h1>
+    <p>Browser-only review. Inventory and reference files remain local by default. No invoice PDF extraction in this PR.</p>
+
+    <section>
+      <input id="file" type="file" accept=".csv,.xlsx">
+      <button id="load">Load inventory</button>
+      <label><input id="offOptIn" type="checkbox"> Enable Open Food Facts fallback (unresolved only, suggestion-only)</label>
+      <button id="cancelLookup" type="button">Cancel OFF lookup</button>
+    </section>
+
+    <section>
+      <input id="referenceFile" type="file" accept=".csv">
+      <button id="loadReference">Load reference CSV</button>
+      <button id="downloadTemplate" type="button">Download reference template</button>
+      <p id="referenceStatus" role="status"></p>
+    </section>
+
+    <section>
+      <label for="filter">Filter</label>
+      <select id="filter">
+        <option value="all">all</option>
+        <option value="review">review</option>
+        <option value="contradiction">contradiction</option>
+        <option value="barcode-review">barcode-review</option>
+        <option value="category-conflict">category-conflict</option>
+      </select>
+      <button id="prev" type="button">Previous page</button>
+      <button id="next" type="button">Next page</button>
+      <span id="progress"></span>
+    </section>
+
+    <p id="status" role="status"></p>
+
+    <div class="scroll">
+      <table>
+        <thead>
+          <tr>
+            <th>Original name</th><th>Current name</th><th>Proposed name</th>
+            <th>Original barcode</th><th>Canonical lookup key</th>
+            <th>Current category</th><th>Proposed category</th>
+            <th>Reference source</th><th>Flags</th><th>Duplicate key</th>
+            <th>Name decision</th><th>Barcode decision</th><th>Category decision</th>
+          </tr>
+        </thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+
+    <section>
+      <button id="saveReview" disabled>Download review CSV</button>
+      <button id="saveApproved" disabled>Download approved CSV</button>
+      <button id="saveAudit" disabled>Download audit CSV</button>
+    </section>
+  </main>
+  <script type="module" src="app.js"></script>
+</body>
+</html>

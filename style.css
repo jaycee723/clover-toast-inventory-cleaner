@@ -1,1 +1,11 @@
-body{font:16px system-ui;background:#101827;color:#eef2ff;margin:0}main{max-width:1300px;margin:auto;padding:24px}button,input{padding:10px;margin:6px;border-radius:6px}button{cursor:pointer;background:#a5b4fc;border:0}.scroll{overflow:auto}table{border-collapse:collapse;width:100%}td,th{padding:8px;border-bottom:1px solid #35425b;text-align:left}td input{min-width:170px;background:#19263b;color:white;border:1px solid #506080}p{line-height:1.5}
+body { font: 15px system-ui; background: #101827; color: #eef2ff; margin: 0; }
+main { max-width: 1500px; margin: auto; padding: 18px; }
+section { margin-bottom: 12px; }
+button, input, select { padding: 8px; margin: 4px; border-radius: 6px; }
+button { cursor: pointer; background: #a5b4fc; border: 0; }
+button:disabled { opacity: 0.5; cursor: default; }
+.scroll { overflow: auto; border: 1px solid #35425b; }
+table { border-collapse: collapse; width: 100%; min-width: 1250px; }
+td, th { padding: 6px; border-bottom: 1px solid #35425b; text-align: left; vertical-align: top; }
+select { background: #19263b; color: #fff; border: 1px solid #506080; }
+p { line-height: 1.4; }

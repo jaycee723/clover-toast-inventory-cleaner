@@ -1,0 +1,12 @@
+{
+  "name": "clover-toast-inventory-cleaner",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/*.test.js"
+  },
+  "dependencies": {
+    "exceljs": "4.4.0"
+  }
+}

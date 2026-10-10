@@ -11,15 +11,27 @@ concurrency:
   group: pages
   cancel-in-progress: false
 jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - run: npm ci
+      - run: npm test
+
   deploy:
+    needs: test
     runs-on: ubuntu-latest
     environment:
       name: github-pages
       url: ${{ steps.deploy.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
+      - run: mkdir -p site/src && cp index.html style.css app.js README.md site/ && cp -r src site/src
       - uses: actions/configure-pages@v5
-      - run: mkdir site && cp index.html style.css app.js site/
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site

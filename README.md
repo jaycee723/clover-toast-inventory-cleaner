@@ -1,11 +1,25 @@
-# Clover to Toast Inventory Review
-Initial browser-only CSV review UI. Uploads stay in your browser. Existing categories and barcode strings are retained. No private inventory, invoices, credentials, or costs are committed.
+# Clover to Toast inventory review
 
-## Current capabilities
-CSV import/export, size/pack formatting, editable names/barcodes/categories, GTIN checksum and duplicate flags. No automatic identity verification or invented barcode digits. The output is a REVIEW CSV, not a validated Toast import.
+Browser-only tool for cleaning a Clover inventory export before a Toast Retail import. Files never leave your computer.
 
-## Deployment
-GitHub Settings > Pages > Source: GitHub Actions. The workflow publishes only index.html, style.css, and app.js.
+## What it does
+- Reads a Clover `.xlsx` or `.csv` (the Categories sheet becomes the canonical category list; existing category memberships are never changed).
+- Analyzes every barcode: UPC-A, EAN-13, EAN-8, UPC-E, GTIN-14. Scientific notation is expanded exactly (string math). Check digits are **never** repaired or appended. 8-digit codes valid as both EAN-8 and UPC-E are shown as ambiguous; single-interpretation 8-digit codes are flagged for a scan check.
+- Matches barcodes against an optional **reference CSV** (`manual_approved` > `manufacturer_official` > `supplier_exact` > `clover_context` > `open_food_facts`). Brand, variant, size and pack count are compared; contradictions become review items (for example a barcode that belongs to a different product). Name-only similarity never assigns a barcode.
+- Formats names conservatively (whitespace, units, pack counts). Spelling changes happen **only** through aliases you approve.
+- Suggests categories only for items with none, and only from your canonical list, with exception rules (snack "Puffs" are not vapes, trail mix is not a drink, pipe tobacco is tobacco, hard tea / Smirnoff Ice are ready-to-drink).
+- Optional Open Food Facts lookup, last resort, for unresolved barcodes only. Results are crowd-sourced suggestions, never labeled manufacturer-verified.
+- Name, barcode and category decisions are tracked separately per row and persist across filtering and paging. The "Approved" CSV contains only rows whose barcode is explicitly accepted and whose proposals are all decided.
 
-## Pending
-XLSX/PDF parsing, supplier barcode references, manufacturer verification, protected-brand spell checking, Open Food Facts fallback, backend authentication, durable jobs and Toast template validation. Do not consider these implemented.
+## Not implemented yet
+- Invoice PDF parsing (detached barcode lists such as Odom's cannot be paired by position). Convert invoices to the reference CSV format for now.
+- Browser tests (Playwright). Unit tests cover the engine only; the UI has not been browser-tested.
+- Validation against Toast's current import template. Do not treat the output as Toast-ready.
+- Open Food Facts may block browser (CORS) calls; the tool reports `unavailable` instead of guessing. The API limit is about 15 reads per minute per IP.
+- Render backend and Clover production OAuth.
+
+## Development
+```
+npm test
+```
+No dependencies. Node 20+.

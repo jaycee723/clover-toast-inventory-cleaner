@@ -1,1 +1,63 @@
-<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Inventory Review</title><link rel="stylesheet" href="style.css"><main><h1>Clover → Toast inventory review</h1><p>Local CSV review. No files are uploaded. Existing categories are preserved. Manufacturer and invoice verification are not implemented yet.</p><input id="file" type="file" accept=".csv"><button id="load">Load CSV</button><button id="save" disabled>Download reviewed CSV</button><p id="status" role="status"></p><div class="scroll"><table><thead><tr><th>Original name</th><th>Reviewed name</th><th>Barcode</th><th>Existing category</th><th>Review flags</th></tr></thead><tbody id="rows"></tbody></table></div></main><script src="app.js"></script></html>
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Inventory identity review</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<main>
+  <h1>Clover → Toast inventory review</h1>
+  <p class="note">Everything runs in your browser; files are not uploaded. Output is a <strong>review CSV</strong>, not a validated Toast import. A valid barcode check digit proves structure only, not product identity.</p>
+
+  <section>
+    <h2>1. Load files</h2>
+    <label>Clover export (.xlsx or .csv) <input id="file" type="file" accept=".csv,.xlsx"></label>
+    <button id="load">Load inventory</button>
+    <label>Reference CSV (optional) <input id="refFile" type="file" accept=".csv"></label>
+    <button id="loadRef">Load references</button>
+    <button id="tpl" type="button">Reference template</button>
+    <p id="status" role="status"></p>
+  </section>
+
+  <section>
+    <h2>2. Approved spellings (optional)</h2>
+    <p class="note">One per line: <code>FROM=&gt;To</code>. Only these are applied; nothing is auto-corrected.</p>
+    <textarea id="aliases" rows="3">KANVA=&gt;Kanva</textarea>
+    <button id="applyAliases" type="button">Apply spellings</button>
+  </section>
+
+  <section>
+    <h2>3. Open Food Facts (last resort)</h2>
+    <label><input id="offOn" type="checkbox"> Look up unresolved barcodes (crowd-sourced, suggestions only, about 14 per minute)</label>
+    <button id="offRun" type="button">Start</button>
+    <button id="offCancel" type="button">Cancel</button>
+    <span id="offProgress"></span>
+  </section>
+
+  <section>
+    <h2>4. Review</h2>
+    <label>Show <select id="filter">
+      <option value="all">All</option><option value="issues">Needs review</option><option value="contradiction">Reference contradictions</option>
+      <option value="duplicate">Duplicate barcodes</option><option value="barcode">Barcode problems</option><option value="pending">Undecided</option><option value="approved">Approved</option>
+    </select></label>
+    <button id="acceptClean" type="button">Accept all clean barcodes</button>
+    <button id="prev" type="button">Previous</button><span id="page"></span><button id="next" type="button">Next</button>
+    <div class="scroll"><table>
+      <thead><tr><th>Original</th><th>Name (current → proposed)</th><th>Barcode</th><th>Category (existing → proposed)</th><th>Reference / issues</th><th>Name</th><th>Barcode</th><th>Category</th></tr></thead>
+      <tbody id="rows"></tbody>
+    </table></div>
+  </section>
+
+  <section>
+    <h2>5. Download</h2>
+    <button id="dlReview" type="button">Review CSV (all rows)</button>
+    <button id="dlApproved" type="button">Approved CSV (fully decided)</button>
+    <button id="dlSave" type="button">Save decisions</button>
+    <label>Restore decisions <input id="sessFile" type="file" accept=".json"></label>
+  </section>
+</main>
+<script type="module" src="app.js"></script>
+</body>
+</html>

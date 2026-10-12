@@ -1,7 +1,8 @@
-name: Deploy Pages
+name: Test and deploy Pages
 on:
   push:
     branches: [main]
+  pull_request:
   workflow_dispatch:
 permissions:
   contents: read
@@ -11,18 +12,27 @@ concurrency:
   group: pages
   cancel-in-progress: false
 jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm test
   deploy:
+    if: github.ref == 'refs/heads/main'
+    needs: test
     runs-on: ubuntu-latest
     environment:
       name: github-pages
       url: ${{ steps.deploy.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
+      - run: mkdir site && cp index.html style.css app.js site/ && cp -r src site/src
       - uses: actions/configure-pages@v5
-      - run: mkdir site && cp index.html style.css app.js site/
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site
-      - name: Deploy
-        id: deploy
+      - id: deploy
         uses: actions/deploy-pages@v4

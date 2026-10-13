@@ -1,0 +1,95 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Default deny catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidUser(data, userId) {
+      return data.keys().hasAll(['id', 'email', 'createdAt'])
+        && data.keys().hasOnly(['id', 'email', 'createdAt'])
+        && data.id == userId
+        && data.id == request.auth.uid
+        && data.email is string
+        && data.email.size() > 0
+        && data.email.size() <= 256
+        && data.createdAt is timestamp;
+    }
+
+    function isValidSession(data, userId, sessionId) {
+      return data.keys().hasAll(['id', 'userId', 'name', 'decisionsJson', 'itemCount', 'approvedCount', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'userId', 'name', 'decisionsJson', 'itemCount', 'approvedCount', 'createdAt', 'updatedAt'])
+        && data.id == sessionId
+        && data.userId == userId
+        && data.userId == request.auth.uid
+        && data.name is string
+        && data.name.size() > 0
+        && data.name.size() <= 128
+        && data.decisionsJson is string
+        && data.decisionsJson.size() <= 500000
+        && data.itemCount is number
+        && data.itemCount >= 0
+        && data.approvedCount is number
+        && data.approvedCount >= 0
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    match /users/{userId} {
+      allow get: if isOwner(userId) && isValidId(userId);
+      allow list: if false;
+      allow create: if isOwner(userId)
+        && isValidId(userId)
+        && isValidUser(incoming(), userId)
+        && incoming().createdAt == request.time;
+      allow update: if isOwner(userId)
+        && isValidId(userId)
+        && isValidUser(incoming(), userId)
+        && incoming().id == existing().id
+        && incoming().createdAt == existing().createdAt
+        && incoming().diff(existing()).affectedKeys().hasOnly(['email']);
+      allow delete: if isOwner(userId) && isValidId(userId);
+
+      match /sessions/{sessionId} {
+        allow get: if isOwner(userId) && isValidId(sessionId);
+        allow list: if isOwner(userId);
+        allow create: if isOwner(userId)
+          && isValidId(sessionId)
+          && isValidSession(incoming(), userId, sessionId)
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time;
+        allow update: if isOwner(userId)
+          && isValidId(sessionId)
+          && isValidSession(incoming(), userId, sessionId)
+          && incoming().id == existing().id
+          && incoming().userId == existing().userId
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'decisionsJson', 'itemCount', 'approvedCount', 'updatedAt']);
+        allow delete: if isOwner(userId) && isValidId(sessionId);
+      }
+    }
+  }
+}

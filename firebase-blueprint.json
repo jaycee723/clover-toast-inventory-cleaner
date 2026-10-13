@@ -1,0 +1,99 @@
+{
+  "entities": {
+    "user": {
+      "title": "User",
+      "description": "User profile document containing authentication metadata",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Firebase Auth UID",
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "maxLength": 128
+        },
+        "email": {
+          "type": "string",
+          "description": "User email address",
+          "maxLength": 256
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp of profile creation"
+        }
+      },
+      "required": ["id", "email", "createdAt"]
+    },
+    "session": {
+      "title": "InventoryReviewSession",
+      "description": "Saved inventory review session with decisions, aliases, and statistics",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Session ID",
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "maxLength": 128
+        },
+        "userId": {
+          "type": "string",
+          "description": "Owner user UID",
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "maxLength": 128
+        },
+        "name": {
+          "type": "string",
+          "description": "Session title",
+          "maxLength": 128
+        },
+        "decisionsJson": {
+          "type": "string",
+          "description": "Serialized review decisions state",
+          "maxLength": 500000
+        },
+        "itemCount": {
+          "type": "number",
+          "description": "Total number of inventory items"
+        },
+        "approvedCount": {
+          "type": "number",
+          "description": "Number of fully approved items"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Creation timestamp"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Last update timestamp"
+        }
+      },
+      "required": [
+        "id",
+        "userId",
+        "name",
+        "decisionsJson",
+        "itemCount",
+        "approvedCount",
+        "createdAt",
+        "updatedAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": {
+        "$ref": "#/entities/user"
+      },
+      "description": "User profile document owned exclusively by the authenticated user"
+    },
+    "/users/{userId}/sessions/{sessionId}": {
+      "schema": {
+        "$ref": "#/entities/session"
+      },
+      "description": "User inventory review sessions storage"
+    }
+  }
+}

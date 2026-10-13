@@ -4,17 +4,50 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Inventory identity review</title>
+  <meta name="description" content="In-browser Clover to Toast inventory review, barcode identity matching, and cleaning tool.">
+  <meta property="og:title" content="Inventory identity review">
+  <meta property="og:description" content="In-browser Clover to Toast inventory review, barcode identity matching, and cleaning tool.">
   <link rel="stylesheet" href="style.css">
+  <script type="importmap">
+  {
+    "imports": {
+      "firebase/app": "https://www.gstatic.com/firebasejs/11.4.0/firebase-app.js",
+      "firebase/auth": "https://www.gstatic.com/firebasejs/11.4.0/firebase-auth.js",
+      "firebase/firestore": "https://www.gstatic.com/firebasejs/11.4.0/firebase-firestore.js"
+    }
+  }
+  </script>
 </head>
 <body>
 <main>
   <h1>Clover → Toast inventory review</h1>
   <p class="note">Everything runs in your browser; files are not uploaded. Output is a <strong>review CSV</strong>, not a validated Toast import. A valid barcode check digit proves structure only, not product identity.</p>
 
+  <section id="firebaseSection">
+    <h2>Cloud Sync &amp; Backup (Firebase Firestore)</h2>
+    <div class="auth-bar">
+      <span id="userStatus">Not signed in</span>
+      <button id="authBtn" type="button">Sign in with Google</button>
+    </div>
+    <div id="cloudControls">
+      <input id="cloudSessionName" type="text" placeholder="Session name (e.g. Oct Review)" style="min-width:240px;">
+      <button id="saveCloud" type="button">Save to Cloud</button>
+      <label>Cloud sessions:
+        <select id="cloudSessionsList">
+          <option value="">(Sign in to view saved sessions)</option>
+        </select>
+      </label>
+      <button id="loadCloud" type="button">Load</button>
+      <button id="deleteCloud" type="button">Delete</button>
+      <button id="refreshCloud" type="button">Refresh list</button>
+    </div>
+    <p id="cloudStatus" class="note"></p>
+  </section>
+
   <section>
     <h2>1. Load files</h2>
     <label>Clover export (.xlsx or .csv) <input id="file" type="file" accept=".csv,.xlsx"></label>
-    <button id="load">Load inventory</button>
+    <button id="load">Load invoice</button>
     <label>Reference CSV (optional) <input id="refFile" type="file" accept=".csv"></label>
     <button id="loadRef">Load references</button>
     <button id="tpl" type="button">Reference template</button>

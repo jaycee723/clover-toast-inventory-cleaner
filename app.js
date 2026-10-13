@@ -3,6 +3,15 @@ import { parseInventoryFile } from './src/xlsx.js';
 import { parseReferenceCsv, buildReferenceIndex, referenceTemplateCsv } from './src/reference.js';
 import { buildRows, setDecision, issues, approvedRows, acceptCleanBarcodes, summarize, exportHeader, exportRows, applyOffSuggestions, saveSession, loadSession, isApproved } from './src/review.js';
 import { runOffQueue } from './src/off.js';
+import {
+  signInWithGoogle,
+  signOutUser,
+  onAuthChange,
+  saveCloudSession,
+  listCloudSessions,
+  loadCloudSession,
+  deleteCloudSession,
+} from './src/firebase.js';
 
 const $ = (id) => document.getElementById(id);
 const S = { records: [], canonical: [], refs: [], rows: [], aliases: [], page: 1, size: 25, filter: 'all', offCache: new Map(), abort: null };
@@ -74,3 +83,138 @@ $('dlReview').onclick = () => download('inventory_review.csv', toCsv([exportHead
 $('dlApproved').onclick = () => download('inventory_approved.csv', toCsv([exportHeader, ...exportRows(approvedRows(S.rows))]));
 $('dlSave').onclick = () => download('session-decisions.json', saveSession(S.rows), 'application/json');
 $('sessFile').onchange = async () => { try { loadSession(S.rows, await $('sessFile').files[0].text()); render(); } catch (e) { fail('status', e); } };
+
+// Firebase Cloud Sync
+let currentUser = null;
+
+async function refreshCloudList() {
+  const sel = $('cloudSessionsList');
+  if (!sel) return;
+  sel.replaceChildren();
+  if (!currentUser) {
+    const opt = document.createElement('option');
+    opt.value = '';
+    opt.textContent = '(Sign in to view saved sessions)';
+    sel.append(opt);
+    return;
+  }
+  try {
+    const statusEl = $('cloudStatus');
+    if (statusEl) statusEl.textContent = 'Loading cloud sessions…';
+    const sessions = await listCloudSessions();
+    if (!sessions || sessions.length === 0) {
+      const opt = document.createElement('option');
+      opt.value = '';
+      opt.textContent = '(No saved sessions in cloud)';
+      sel.append(opt);
+      if (statusEl) statusEl.textContent = 'No sessions found in your cloud account.';
+      return;
+    }
+    for (const sess of sessions) {
+      const opt = document.createElement('option');
+      opt.value = sess.id;
+      const count = sess.itemCount != null ? ` (${sess.approvedCount || 0}/${sess.itemCount} approved)` : '';
+      opt.textContent = `${sess.name || 'Untitled'}${count}`;
+      sel.append(opt);
+    }
+    if (statusEl) statusEl.textContent = `${sessions.length} cloud session(s) available.`;
+  } catch (e) {
+    fail('cloudStatus', e);
+  }
+}
+
+onAuthChange((user) => {
+  currentUser = user;
+  const userStatus = $('userStatus');
+  const authBtn = $('authBtn');
+  if (user) {
+    if (userStatus) userStatus.textContent = `Signed in: ${user.email || user.displayName || user.uid}`;
+    if (authBtn) authBtn.textContent = 'Sign out';
+  } else {
+    if (userStatus) userStatus.textContent = 'Not signed in';
+    if (authBtn) authBtn.textContent = 'Sign in with Google';
+  }
+  refreshCloudList();
+});
+
+const authBtn = $('authBtn');
+if (authBtn) {
+  authBtn.onclick = async () => {
+    try {
+      if (currentUser) {
+        await signOutUser();
+        const statusEl = $('cloudStatus');
+        if (statusEl) statusEl.textContent = 'Signed out successfully.';
+      } else {
+        const statusEl = $('cloudStatus');
+        if (statusEl) statusEl.textContent = 'Signing in…';
+        await signInWithGoogle();
+        if (statusEl) statusEl.textContent = 'Signed in successfully.';
+      }
+    } catch (e) {
+      fail('cloudStatus', e);
+    }
+  };
+}
+
+const saveCloudBtn = $('saveCloud');
+if (saveCloudBtn) {
+  saveCloudBtn.onclick = async () => {
+    try {
+      if (!currentUser) throw new Error('Sign in with Google to save to cloud');
+      if (!S.rows.length) throw new Error('No inventory loaded to save');
+      const name = ($('cloudSessionName')?.value || '').trim() || `Inventory Review (${new Date().toLocaleTimeString()})`;
+      const statusEl = $('cloudStatus');
+      if (statusEl) statusEl.textContent = 'Saving to Firestore…';
+      const s = summarize(S.rows);
+      await saveCloudSession(name, saveSession(S.rows), s.total, s.approved);
+      if (statusEl) statusEl.textContent = `Saved session "${name}" to Firestore!`;
+      if ($('cloudSessionName')) $('cloudSessionName').value = '';
+      await refreshCloudList();
+    } catch (e) {
+      fail('cloudStatus', e);
+    }
+  };
+}
+
+const loadCloudBtn = $('loadCloud');
+if (loadCloudBtn) {
+  loadCloudBtn.onclick = async () => {
+    try {
+      if (!currentUser) throw new Error('Sign in with Google first');
+      const sessId = $('cloudSessionsList')?.value;
+      if (!sessId) throw new Error('Select a cloud session to load');
+      const statusEl = $('cloudStatus');
+      if (statusEl) statusEl.textContent = 'Loading from Firestore…';
+      const docData = await loadCloudSession(sessId);
+      loadSession(S.rows, docData.decisionsJson);
+      render();
+      if (statusEl) statusEl.textContent = `Loaded "${docData.name}" from Firestore (${docData.approvedCount || 0} approved).`;
+    } catch (e) {
+      fail('cloudStatus', e);
+    }
+  };
+}
+
+const deleteCloudBtn = $('deleteCloud');
+if (deleteCloudBtn) {
+  deleteCloudBtn.onclick = async () => {
+    try {
+      if (!currentUser) throw new Error('Sign in with Google first');
+      const sessId = $('cloudSessionsList')?.value;
+      if (!sessId) throw new Error('Select a cloud session to delete');
+      const statusEl = $('cloudStatus');
+      if (statusEl) statusEl.textContent = 'Deleting from Firestore…';
+      await deleteCloudSession(sessId);
+      if (statusEl) statusEl.textContent = 'Cloud session deleted.';
+      await refreshCloudList();
+    } catch (e) {
+      fail('cloudStatus', e);
+    }
+  };
+}
+
+const refreshCloudBtn = $('refreshCloud');
+if (refreshCloudBtn) {
+  refreshCloudBtn.onclick = () => { refreshCloudList(); };
+}

@@ -1,0 +1,8 @@
+{
+  "name": "Inventory identity review",
+  "description": "In-browser Clover to Toast inventory review, barcode identity matching, and cleaning tool.",
+  "permissions": [],
+  "capabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

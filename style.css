@@ -4,3 +4,4 @@ button,input,select,textarea{font:inherit;margin:4px;padding:6px 10px;border-rad
 button{cursor:pointer;background:#6366f1;border:0;color:#fff}button:disabled{opacity:.5}textarea{width:min(520px,95%)}
 .scroll{overflow:auto}table{border-collapse:collapse;width:100%}td,th{padding:6px;border-bottom:1px solid #334155;text-align:left;vertical-align:top}
 .bad{color:#fca5a5}.ok{color:#86efac}.small{font-size:12px;color:#94a3b8}
+.auth-bar{display:flex;align-items:center;gap:12px;margin-bottom:8px;flex-wrap:wrap}#cloudControls{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:8px}

@@ -322,6 +322,30 @@ export const SPELLCHECK_PRESETS = {
   },
 };
 
+// Aliases and packaging standards for preset selector
+SPELLCHECK_PRESETS.liquor = SPELLCHECK_PRESETS.beverage;
+SPELLCHECK_PRESETS.retail = SPELLCHECK_PRESETS.brands;
+SPELLCHECK_PRESETS.units = {
+  name: 'Standard Units & Packaging',
+  rules: [
+    { from: '12PK', to: '12 Pack', reason: 'Packaging standardization' },
+    { from: '6PK', to: '6 Pack', reason: 'Packaging standardization' },
+    { from: '24PK', to: '24 Pack', reason: 'Packaging standardization' },
+    { from: '4PK', to: '4 Pack', reason: 'Packaging standardization' },
+    { from: '30PK', to: '30 Pack', reason: 'Packaging standardization' },
+    { from: '750ML', to: '750 mL', reason: 'Volume standard' },
+    { from: '1.75L', to: '1.75 L', reason: 'Volume standard' },
+    { from: '1L', to: '1 L', reason: 'Volume standard' },
+    { from: '500ML', to: '500 mL', reason: 'Volume standard' },
+    { from: '375ML', to: '375 mL', reason: 'Volume standard' },
+    { from: '355ML', to: '355 mL', reason: 'Volume standard' },
+    { from: '12OZ', to: '12 oz', reason: 'Volume standard' },
+    { from: '16OZ', to: '16 oz', reason: 'Volume standard' },
+    { from: 'EA', to: 'Each', reason: 'Unit of measure standard' },
+    { from: 'ASST', to: 'Assorted', reason: 'Descriptor standard' },
+  ],
+};
+
 // 7. Parse raw rule text (FROM=>To # Reason)
 export function parseAliasText(text = '') {
   return String(text)

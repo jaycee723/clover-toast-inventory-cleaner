@@ -42,31 +42,43 @@
     <div class="hero-content">
       <div class="hero-header">
         <div>
-          <h2 class="hero-title">⚡ 1-Click Auto Process &amp; Toast Export</h2>
+          <h2 class="hero-title">⚡ 1-Click Auto Clean &amp; Toast POS Export</h2>
           <p class="hero-subtitle">
-            Combines file loading, spelling naturalization, barcode check-digit validation, clean acceptance, and Toast CSV file generation into a single click.
+            Combines parsing Clover exports, normalizing units/brands, validating barcodes, auto-approving clean items, and generating your actual <strong>Toast POS import CSV</strong> with <strong>barcode as the product identity</strong>.
           </p>
         </div>
         <div id="toastOverallBadge" class="toast-badge-warn">0 ready for Toast</div>
       </div>
 
-      <div class="hero-action-row">
-        <label class="file-pill">
-          <span>📁 Select Clover File (.xlsx / .csv):</span>
-          <input id="file" type="file" accept=".csv,.xlsx" style="max-width:220px;padding:3px;font-size:12px;">
-        </label>
-
-        <button id="btnOneClickAuto" type="button" class="btn-auto-process">
-          <span>🚀 Auto-Clean &amp; Download Toast File</span>
-        </button>
-
-        <button id="load" type="button" class="btn-secondary btn-sm" title="Only load file without auto-exporting">
-          Load invoice
-        </button>
+      <div id="dropzone" class="dropzone" style="margin-bottom:14px;">
+        <span class="dropzone-icon">📥</span>
+        <div class="dropzone-title">Drop your Clover inventory file here, or click to browse</div>
+        <div class="dropzone-sub">Supports <strong>.xlsx</strong> and <strong>.csv</strong> spreadsheets exported from Clover POS</div>
+        <input id="file" type="file" accept=".csv,.xlsx" aria-label="Choose Clover inventory file">
       </div>
 
-      <div id="autoProcessLog" style="display:none;margin-top:12px;background:rgba(0,0,0,0.4);border-radius:8px;padding:10px 14px;font-size:13px;line-height:1.5;"></div>
-      <p id="status" class="note" style="margin-top:8px;margin-bottom:0;"></p>
+      <div class="hero-action-row" style="justify-content:space-between;">
+        <div class="flex-wrap" style="align-items:center;">
+          <button id="btnOneClickAuto" type="button" class="btn-auto-process">
+            <span>🚀 Auto-Clean &amp; Download Toast File</span>
+          </button>
+          <button id="load" type="button" class="btn-secondary btn-sm" title="Only load file into table without auto-downloading">
+            Load file only
+          </button>
+        </div>
+
+        <div class="flex-wrap" style="align-items:center;">
+          <label class="small text-muted" style="margin:0;">Target Format:
+            <select id="heroToastFormat" style="padding:4px 8px;font-size:12px;">
+              <option value="retail">Toast Retail Item Catalog (.csv)</option>
+              <option value="menu">Toast Menu Bulk Import (.csv)</option>
+            </select>
+          </label>
+        </div>
+      </div>
+
+      <div id="autoProcessLog" style="display:none;margin-top:14px;background:rgba(0,0,0,0.5);border:1px solid #334155;border-radius:10px;padding:14px 18px;font-size:13px;line-height:1.6;"></div>
+      <p id="status" class="note" style="margin-top:10px;margin-bottom:0;"></p>
     </div>
   </div>
 
@@ -176,8 +188,9 @@
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
         <h2>Item Review &amp; Decisions</h2>
         <div class="flex-wrap">
-          <button id="acceptClean" type="button" class="btn-secondary btn-sm">Accept all clean barcodes</button>
-          <button id="acceptSafeProposals" type="button" class="btn-secondary btn-sm">Approve all safe name &amp; category proposals</button>
+          <button id="autoApproveAll" type="button" class="btn-toast btn-sm">⚡ Auto-Approve All Ready Items</button>
+          <button id="acceptClean" type="button" class="btn-secondary btn-sm">Accept clean barcodes</button>
+          <button id="acceptSafeProposals" type="button" class="btn-secondary btn-sm">Approve safe proposals</button>
         </div>
       </div>
 

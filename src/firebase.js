@@ -76,10 +76,25 @@ if (typeof window !== 'undefined') {
   testConnection();
 }
 
+import { WORKSPACE_SCOPES } from './workspace.js';
+
+let cachedAccessToken = null;
+
+export function getAccessToken() {
+  return cachedAccessToken;
+}
+
 export async function signInWithGoogle() {
   const provider = new GoogleAuthProvider();
+  for (const s of WORKSPACE_SCOPES) {
+    provider.addScope(s);
+  }
   provider.setCustomParameters({ prompt: 'select_account' });
   const cred = await signInWithPopup(auth, provider);
+  const credential = GoogleAuthProvider.credentialFromResult(cred);
+  if (credential?.accessToken) {
+    cachedAccessToken = credential.accessToken;
+  }
   const user = cred.user;
   if (user) {
     const userRef = doc(db, 'users', user.uid);
@@ -96,11 +111,12 @@ export async function signInWithGoogle() {
       console.warn('User profile initial sync notice:', err);
     }
   }
-  return user;
+  return { user, accessToken: cachedAccessToken };
 }
 
 export async function signOutUser() {
   await signOut(auth);
+  cachedAccessToken = null;
 }
 
 export function onAuthChange(callback) {

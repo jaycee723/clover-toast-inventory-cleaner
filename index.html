@@ -20,76 +20,363 @@
 </head>
 <body>
 <main>
-  <h1>Clover → Toast inventory review</h1>
-  <p class="note">Everything runs in your browser; files are not uploaded. Output is a <strong>review CSV</strong>, not a validated Toast import. A valid barcode check digit proves structure only, not product identity.</p>
-
-  <section id="firebaseSection">
-    <h2>Cloud Sync &amp; Backup (Firebase Firestore)</h2>
+  <!-- Top App Header -->
+  <header class="app-header">
+    <div class="app-title-group">
+      <h1>
+        <span>🍀 Clover → 🍞 Toast</span>
+        <span class="app-title-badge">Retail POS Ready</span>
+      </h1>
+      <p class="note" style="margin:0;">
+        Transforms messy POS exports into validated <strong>Toast import files</strong> using <strong>barcode as the product identity</strong>. All processing happens safely inside your browser.
+      </p>
+    </div>
     <div class="auth-bar">
-      <span id="userStatus">Not signed in</span>
-      <button id="authBtn" type="button">Sign in with Google</button>
+      <span id="userStatus" class="status-pill">Not signed in</span>
+      <button id="authBtn" type="button" class="btn-secondary btn-sm">Sign in with Google</button>
     </div>
-    <div id="cloudControls">
-      <input id="cloudSessionName" type="text" placeholder="Session name (e.g. Oct Review)" style="min-width:240px;">
-      <button id="saveCloud" type="button">Save to Cloud</button>
-      <label>Cloud sessions:
-        <select id="cloudSessionsList">
-          <option value="">(Sign in to view saved sessions)</option>
-        </select>
-      </label>
-      <button id="loadCloud" type="button">Load</button>
-      <button id="deleteCloud" type="button">Delete</button>
-      <button id="refreshCloud" type="button">Refresh list</button>
+  </header>
+
+  <!-- 1-Click Hero Banner: Unified Process -->
+  <div class="hero-card">
+    <div class="hero-content">
+      <div class="hero-header">
+        <div>
+          <h2 class="hero-title">⚡ 1-Click Auto Process &amp; Toast Export</h2>
+          <p class="hero-subtitle">
+            Combines file loading, spelling naturalization, barcode check-digit validation, clean acceptance, and Toast CSV file generation into a single click.
+          </p>
+        </div>
+        <div id="toastOverallBadge" class="toast-badge-warn">0 ready for Toast</div>
+      </div>
+
+      <div class="hero-action-row">
+        <label class="file-pill">
+          <span>📁 Select Clover File (.xlsx / .csv):</span>
+          <input id="file" type="file" accept=".csv,.xlsx" style="max-width:220px;padding:3px;font-size:12px;">
+        </label>
+
+        <button id="btnOneClickAuto" type="button" class="btn-auto-process">
+          <span>🚀 Auto-Clean &amp; Download Toast File</span>
+        </button>
+
+        <button id="load" type="button" class="btn-secondary btn-sm" title="Only load file without auto-exporting">
+          Load invoice
+        </button>
+      </div>
+
+      <div id="autoProcessLog" style="display:none;margin-top:12px;background:rgba(0,0,0,0.4);border-radius:8px;padding:10px 14px;font-size:13px;line-height:1.5;"></div>
+      <p id="status" class="note" style="margin-top:8px;margin-bottom:0;"></p>
     </div>
-    <p id="cloudStatus" class="note"></p>
-  </section>
+  </div>
 
-  <section>
-    <h2>1. Load files</h2>
-    <label>Clover export (.xlsx or .csv) <input id="file" type="file" accept=".csv,.xlsx"></label>
-    <button id="load">Load invoice</button>
-    <label>Reference CSV (optional) <input id="refFile" type="file" accept=".csv"></label>
-    <button id="loadRef">Load references</button>
-    <button id="tpl" type="button">Reference template</button>
-    <p id="status" role="status"></p>
-  </section>
+  <!-- Navigation Tabs for Intuitive Sections -->
+  <nav class="nav-tabs" role="tablist">
+    <button type="button" class="nav-tab active" data-tab="tab-toast">
+      <span>🍞 Toast Export</span>
+      <span id="tabToastCount" class="tab-badge">Ready</span>
+    </button>
+    <button type="button" class="nav-tab" data-tab="tab-review">
+      <span>📋 Review &amp; Table</span>
+      <span id="tabReviewCount" class="tab-badge">0</span>
+    </button>
+    <button type="button" class="nav-tab" data-tab="tab-spellcheck">
+      <span>✨ Spelling &amp; Terms</span>
+      <span id="tabRuleCount" class="tab-badge">0 rules</span>
+    </button>
+    <button type="button" class="nav-tab" data-tab="tab-workspace">
+      <span>☁️ Google Workspace &amp; Cloud</span>
+    </button>
+  </nav>
 
-  <section>
-    <h2>2. Approved spellings (optional)</h2>
-    <p class="note">One per line: <code>FROM=&gt;To</code>. Only these are applied; nothing is auto-corrected.</p>
-    <textarea id="aliases" rows="3">KANVA=&gt;Kanva</textarea>
-    <button id="applyAliases" type="button">Apply spellings</button>
-  </section>
+  <!-- TAB 1: Toast POS Import File & Exports -->
+  <div id="tab-toast" class="tab-pane active">
+    <section id="toastSection">
+      <h2>Toast POS Import File &amp; Readiness</h2>
+      <p class="note">
+        Toast POS Retail items are uniquely identified by barcode. This file populates both <strong>SKU</strong> and <strong>Barcode</strong> with preserved leading zeros, clean item names, and retail pricing.
+      </p>
 
-  <section>
-    <h2>3. Open Food Facts (last resort)</h2>
-    <label><input id="offOn" type="checkbox"> Look up unresolved barcodes (crowd-sourced, suggestions only, about 14 per minute)</label>
-    <button id="offRun" type="button">Start</button>
-    <button id="offCancel" type="button">Cancel</button>
-    <span id="offProgress"></span>
-  </section>
+      <div class="toast-panel">
+        <div class="toast-stat-grid" id="toastStatsGrid">
+          <div class="toast-stat-chip">
+            <span class="small text-muted">Ready with Barcode Identity:</span>
+            <strong id="toastReadyCount" class="ok">0</strong>
+          </div>
+          <div class="toast-stat-chip">
+            <span class="small text-muted">Pending Decisions:</span>
+            <strong id="toastPendingCount" class="small">0</strong>
+          </div>
+          <div class="toast-stat-chip">
+            <span class="small text-muted">Missing Barcode:</span>
+            <strong id="toastMissingBarcodeCount" class="bad">0</strong>
+          </div>
+          <div class="toast-stat-chip">
+            <span class="small text-muted">Duplicate Barcodes:</span>
+            <strong id="toastDuplicateBarcodeCount" class="bad">0</strong>
+          </div>
+        </div>
 
-  <section>
-    <h2>4. Review</h2>
-    <label>Show <select id="filter">
-      <option value="all">All</option><option value="issues">Needs review</option><option value="contradiction">Reference contradictions</option>
-      <option value="duplicate">Duplicate barcodes</option><option value="barcode">Barcode problems</option><option value="pending">Undecided</option><option value="approved">Approved</option>
-    </select></label>
-    <button id="acceptClean" type="button">Accept all clean barcodes</button>
-    <button id="prev" type="button">Previous</button><span id="page"></span><button id="next" type="button">Next</button>
-    <div class="scroll"><table>
-      <thead><tr><th>Original</th><th>Name (current → proposed)</th><th>Barcode</th><th>Category (existing → proposed)</th><th>Reference / issues</th><th>Name</th><th>Barcode</th><th>Category</th></tr></thead>
-      <tbody id="rows"></tbody>
-    </table></div>
-  </section>
+        <div class="flex-wrap" style="margin-top:14px;">
+          <label>Toast Import Format:
+            <select id="toastFormat">
+              <option value="retail">Toast Retail Item Catalog (.csv)</option>
+              <option value="menu">Toast Menu Bulk Import (.csv)</option>
+            </select>
+          </label>
 
-  <section>
-    <h2>5. Download</h2>
-    <button id="dlReview" type="button">Review CSV (all rows)</button>
-    <button id="dlApproved" type="button">Approved CSV (fully decided)</button>
-    <button id="dlSave" type="button">Save decisions</button>
-    <label>Restore decisions <input id="sessFile" type="file" accept=".json"></label>
-  </section>
+          <label>Scope:
+            <select id="toastScope">
+              <option value="approved">Approved items only (strict, fully decided)</option>
+              <option value="allValid">All items with valid barcode identity</option>
+            </select>
+          </label>
+
+          <button id="dlToast" type="button" class="btn-toast">
+            Download Usable Toast Import File
+          </button>
+          <button id="btnValidateToast" type="button" class="btn-outline">
+            Check Toast Import Readiness
+          </button>
+        </div>
+
+        <div id="toastValidationOutput" class="toast-validation-box" style="display:none;"></div>
+        <p id="toastStatus" class="note" style="margin-top:8px;"></p>
+      </div>
+
+      <div style="margin-top:16px;">
+        <details>
+          <summary><strong>Internal Auditing &amp; Raw Exports</strong></summary>
+          <p class="text-muted" style="margin:6px 0;">Detailed CSV files containing internal status flags for audit trails and offline review.</p>
+          <div class="flex-wrap">
+            <button id="dlReview" type="button" class="btn-secondary btn-sm">Review CSV (all diagnostic rows)</button>
+            <button id="dlApproved" type="button" class="btn-secondary btn-sm">Approved Review CSV (internal fields)</button>
+            <button id="dlSave" type="button" class="btn-secondary btn-sm">Save decisions (.json)</button>
+            <label class="small text-muted">Restore decisions: <input id="sessFile" type="file" accept=".json" style="padding:2px;font-size:11px;"></label>
+          </div>
+        </details>
+      </div>
+    </section>
+
+    <!-- Optional Reference Matching -->
+    <section>
+      <h2>Optional Reference Database</h2>
+      <p class="note">Compare barcodes against manufacturer master catalogs or distributor invoices to verify pack size, brand, and true names.</p>
+      <div class="flex-wrap">
+        <label>Reference CSV: <input id="refFile" type="file" accept=".csv"></label>
+        <button id="loadRef" type="button" class="btn-secondary btn-sm">Load reference CSV</button>
+        <button id="refTemplate" type="button" class="btn-outline btn-sm">Download reference template</button>
+      </div>
+    </section>
+  </div>
+
+  <!-- TAB 2: Review Table & Item Decisions -->
+  <div id="tab-review" class="tab-pane">
+    <section>
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
+        <h2>Item Review &amp; Decisions</h2>
+        <div class="flex-wrap">
+          <button id="acceptClean" type="button" class="btn-secondary btn-sm">Accept all clean barcodes</button>
+          <button id="acceptSafeProposals" type="button" class="btn-secondary btn-sm">Approve all safe name &amp; category proposals</button>
+        </div>
+      </div>
+
+      <div class="flex-wrap" style="margin:10px 0;">
+        <label>Filter: <select id="filter">
+          <option value="all">All items</option>
+          <option value="issues">Needs review</option>
+          <option value="contradiction">Reference contradictions</option>
+          <option value="duplicate">Duplicate barcodes</option>
+          <option value="barcode">Barcode problems</option>
+          <option value="pending">Undecided</option>
+          <option value="approved">Approved</option>
+        </select></label>
+
+        <input id="tableSearch" type="search" placeholder="Search name or barcode…" style="min-width:200px;">
+
+        <div style="margin-left:auto;" class="flex-wrap">
+          <button id="prev" type="button" class="btn-secondary btn-sm">Previous</button>
+          <span id="page" class="small text-muted"></span>
+          <button id="next" type="button" class="btn-secondary btn-sm">Next</button>
+        </div>
+      </div>
+
+      <div class="scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Original</th>
+              <th>Name (Current → Proposed)</th>
+              <th>Barcode &amp; Identity</th>
+              <th>Category</th>
+              <th>Reference / Issues</th>
+              <th>Name Decision</th>
+              <th>Barcode Decision</th>
+              <th>Category Decision</th>
+            </tr>
+          </thead>
+          <tbody id="rows"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Open Food Facts Section -->
+    <section>
+      <h2>Open Food Facts (Optional Lookup)</h2>
+      <p class="note">Query public open database as a last resort for unresolved items.</p>
+      <div class="flex-wrap">
+        <label><input id="offOn" type="checkbox"> Look up unresolved barcodes</label>
+        <button id="offRun" type="button" class="btn-secondary btn-sm">Start lookup</button>
+        <button id="offCancel" type="button" class="btn-secondary btn-sm">Cancel</button>
+        <span id="offProgress" class="small text-muted"></span>
+      </div>
+    </section>
+  </div>
+
+  <!-- TAB 3: Spellcheck & Abbreviations -->
+  <div id="tab-spellcheck" class="tab-pane">
+    <section id="spellcheckSection">
+      <h2>Spelling &amp; Abbreviation Rules</h2>
+      <p class="note">Automatically cleans POS abbreviations (e.g. <code>12PK</code> → <code>12 Pack</code>, <code>750ML</code> → <code>750 mL</code>) and standardizes capitalization.</p>
+
+      <div class="flex-wrap" style="margin-bottom:12px;">
+        <label>Industry Preset:
+          <select id="presetSelect">
+            <option value="">-- Choose preset rules --</option>
+            <option value="liquor">Liquor &amp; Beverage (e.g. PK, ML, CHARD)</option>
+            <option value="retail">General Retail (e.g. EA, ASST, SM, LG)</option>
+            <option value="units">Standardize Packaging &amp; Sizes</option>
+          </select>
+        </label>
+        <button id="scanSpellingBtn" type="button" class="btn-secondary btn-sm">🔍 Scan Inventory for Opportunities</button>
+        <span id="spellScanProgress" class="small text-muted"></span>
+      </div>
+
+      <div id="spellSuggestionsContainer" class="toast-validation-box" style="display:none;margin-bottom:14px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
+          <strong id="suggestionsHeader" style="color:#fdba74;">Detected Spelling Opportunities</strong>
+          <div class="flex-wrap">
+            <button id="approveAllSuggestionsBtn" type="button" class="btn-toast btn-sm">Approve all high-confidence rules</button>
+            <button id="dismissSuggestionsBtn" type="button" class="btn-secondary btn-sm">Dismiss</button>
+          </div>
+        </div>
+        <div id="suggestionsList" class="spell-list"></div>
+      </div>
+
+      <div class="spell-panel">
+        <div class="spell-card">
+          <div style="display:flex;justify-content:space-between;align-items:center;">
+            <strong>Active Rules (<span id="ruleCount">0</span>)</strong>
+          </div>
+          <div class="flex-wrap" style="margin-top:8px;">
+            <input id="newAliasFrom" type="text" placeholder="From (e.g. 12PK)" style="flex:1;min-width:100px;">
+            <input id="newAliasTo" type="text" placeholder="To (e.g. 12 Pack)" style="flex:1;min-width:100px;">
+            <button id="addAliasRule" type="button" class="btn-sm">+ Add</button>
+          </div>
+          <div id="activeRulesList" class="spell-list"></div>
+        </div>
+
+        <div class="spell-card">
+          <details>
+            <summary><strong>Advanced: Direct Text Rule Editor</strong></summary>
+            <p class="text-muted" style="margin:6px 0;">One per line: <code>FROM=&gt;To</code> or <code>FROM=&gt;To # Reason</code>.</p>
+            <textarea id="aliases" rows="7">KANVA=>Kanva # Brand case standardization</textarea>
+            <div style="margin-top:6px;">
+              <button id="syncFromTextarea" type="button" class="btn-secondary btn-sm">Update rules from text</button>
+            </div>
+          </details>
+        </div>
+      </div>
+      <p id="aliasStatus" class="note" style="margin-top:8px;"></p>
+    </section>
+  </div>
+
+  <!-- TAB 4: Google Workspace & Cloud Sync -->
+  <div id="tab-workspace" class="tab-pane">
+    <!-- Firebase Cloud Sync Section -->
+    <section id="firebaseSection">
+      <h2>Cloud Sync &amp; Backup (Firebase Firestore)</h2>
+      <p class="note">Store decision states and sessions in your cloud database to collaborate across devices.</p>
+      <div id="cloudControls" class="flex-wrap">
+        <input id="cloudSessionName" type="text" placeholder="Session name (e.g. Oct Review)" style="min-width:200px;">
+        <button id="saveCloud" type="button" class="btn-secondary btn-sm">Save to Cloud</button>
+        <label>Saved:
+          <select id="cloudSessionsList">
+            <option value="">(Sign in to view saved sessions)</option>
+          </select>
+        </label>
+        <button id="loadCloud" type="button" class="btn-secondary btn-sm">Load</button>
+        <button id="deleteCloud" type="button" class="btn-danger btn-sm">Delete</button>
+        <button id="refreshCloud" type="button" class="btn-secondary btn-sm">Refresh list</button>
+      </div>
+      <p id="cloudStatus" class="note"></p>
+    </section>
+
+    <!-- Google Workspace Suite Section -->
+    <section id="workspaceSection">
+      <h2>Google Workspace Suite</h2>
+      <p class="note">Export directly to Google Sheets, save Toast catalogs to Google Drive, create shelf verification Forms, and generate audit Docs.</p>
+
+      <div class="workspace-grid">
+        <!-- Google Sheets -->
+        <div class="workspace-card">
+          <strong>Google Sheets</strong>
+          <p class="small text-muted">Create a live Google Sheet or import rows directly from a spreadsheet.</p>
+          <div class="flex-wrap">
+            <button id="wsExportToastSheets" type="button" class="btn-toast btn-sm">Export Toast Catalog to Sheets</button>
+            <button id="wsExportSheets" type="button" class="btn-secondary btn-sm">Export Review Sheet</button>
+          </div>
+          <div class="flex-wrap" style="margin-top:6px;">
+            <input id="wsSheetId" type="text" placeholder="Sheet ID or URL" style="flex:1;min-width:140px;">
+            <button id="wsImportSheets" type="button" class="btn-sm">Import</button>
+          </div>
+        </div>
+
+        <!-- Google Drive & Picker -->
+        <div class="workspace-card">
+          <strong>Google Drive &amp; Picker</strong>
+          <p class="small text-muted">Select files directly from Google Drive or save exported CSV reports.</p>
+          <button id="wsPickDrive" type="button" class="btn-secondary btn-sm">Pick inventory from Drive</button>
+          <div class="flex-wrap">
+            <button id="wsSaveToastDrive" type="button" class="btn-toast btn-sm">Save Toast Import to Drive</button>
+            <button id="wsSaveDrive" type="button" class="btn-outline btn-sm">Save Review CSV to Drive</button>
+          </div>
+        </div>
+
+        <!-- Google Docs -->
+        <div class="workspace-card">
+          <strong>Google Docs</strong>
+          <p class="small text-muted">Generate a formatted executive summary and inventory discrepancy audit document.</p>
+          <button id="wsCreateDoc" type="button" class="btn-secondary btn-sm">Generate Audit Doc</button>
+        </div>
+
+        <!-- Google Tasks -->
+        <div class="workspace-card">
+          <strong>Google Tasks</strong>
+          <p class="small text-muted">Convert flagged items into physical shelf audit tasks for store staff.</p>
+          <button id="wsExportTasks" type="button" class="btn-secondary btn-sm">Create Audit Tasks</button>
+        </div>
+
+        <!-- Gmail -->
+        <div class="workspace-card">
+          <strong>Gmail</strong>
+          <p class="small text-muted">Send an inventory review report with summary stats directly via Gmail.</p>
+          <div class="flex-wrap">
+            <input id="wsEmailRecipient" type="email" placeholder="Recipient email" style="flex:1;min-width:140px;">
+            <button id="wsSendEmail" type="button" class="btn-secondary btn-sm">Send Email</button>
+          </div>
+        </div>
+
+        <!-- Google Forms -->
+        <div class="workspace-card">
+          <strong>Google Forms</strong>
+          <p class="small text-muted">Generate a mobile-friendly Google Form with questions for staff to scan physical shelf barcodes.</p>
+          <button id="wsCreateForm" type="button" class="btn-secondary btn-sm">Generate Verification Form</button>
+        </div>
+      </div>
+      <p id="wsStatus" class="note" style="margin-top:10px;"></p>
+    </section>
+  </div>
 </main>
 <script type="module" src="app.js"></script>
 </body>

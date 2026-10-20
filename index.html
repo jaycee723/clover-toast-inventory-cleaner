@@ -32,6 +32,10 @@
       </p>
     </div>
     <div class="auth-bar">
+      <button id="openAiDrawerBtn" type="button" class="btn-ai-assistant">
+        <span>✨ Gemini AI Assistant</span>
+        <span class="ai-badge">Free Cloud</span>
+      </button>
       <span id="userStatus" class="status-pill">Not signed in</span>
       <button id="authBtn" type="button" class="btn-secondary btn-sm">Sign in with Google</button>
     </div>
@@ -74,6 +78,22 @@
               <option value="menu">Toast Menu Bulk Import (.csv)</option>
             </select>
           </label>
+        </div>
+      </div>
+
+      <!-- 13-Digit Barcode Auto-Padding Banner -->
+      <div id="barcodePaddingBanner" class="barcode-pad-banner" style="display:none;">
+        <div class="barcode-pad-info">
+          <span class="barcode-pad-badge">Padding Check</span>
+          <span id="barcodePadStatusText">Found <strong>0</strong> barcodes missing leading zeros (under 13 digits)</span>
+        </div>
+        <div class="flex-wrap" style="align-items:center;">
+          <button id="btnAutoPad13" type="button" class="btn-pad-action">
+            <span>🔢 Auto-pad all barcodes to 13 digits</span>
+          </button>
+          <button id="btnUndoPad13" type="button" class="btn-secondary btn-sm" style="display:none;">
+            <span>↩️ Undo Padding</span>
+          </button>
         </div>
       </div>
 
@@ -189,6 +209,7 @@
         <h2>Item Review &amp; Decisions</h2>
         <div class="flex-wrap">
           <button id="autoApproveAll" type="button" class="btn-toast btn-sm">⚡ Auto-Approve All Ready Items</button>
+          <button id="btnAutoPadReview" type="button" class="btn-pad-action btn-sm">🔢 Auto-pad all barcodes to 13 digits</button>
           <button id="acceptClean" type="button" class="btn-secondary btn-sm">Accept clean barcodes</button>
           <button id="acceptSafeProposals" type="button" class="btn-secondary btn-sm">Approve safe proposals</button>
         </div>
@@ -390,6 +411,91 @@
       <p id="wsStatus" class="note" style="margin-top:10px;"></p>
     </section>
   </div>
+
+  <!-- Gemini AI Formatting Assistant Slide-Out Drawer & Overlay -->
+  <div id="aiDrawerOverlay" class="ai-drawer-overlay"></div>
+  <aside id="aiDrawer" class="ai-drawer" aria-label="Gemini AI Assistant Drawer">
+    <div class="ai-drawer-header">
+      <div class="ai-drawer-title">
+        <span>✨ Gemini AI Dataset Assistant</span>
+        <span class="ai-badge">Free Cloud Flash</span>
+      </div>
+      <button id="closeAiDrawerBtn" type="button" class="ai-drawer-close" aria-label="Close Assistant">✕</button>
+    </div>
+
+    <div class="ai-drawer-body">
+      <!-- Quick Prompt Suggestion Chips -->
+      <div class="ai-chips-section">
+        <span class="ai-chips-label">Quick Formatting Presets</span>
+        <div class="ai-chips-row">
+          <button type="button" class="ai-chip-btn" data-prompt="Standardize all liquor and beer brand names to Title Case">Title Case Brands</button>
+          <button type="button" class="ai-chip-btn" data-prompt="Format bottle volumes cleanly (e.g. 750ml, 1.75L, 375ml) at the end of the item name">Standardize Bottle Volumes</button>
+          <button type="button" class="ai-chip-btn" data-prompt="Standardize pack sizes (convert '6PK' to '6-Pack', '12PK' to '12-Pack')">Standardize Pack Sizes</button>
+          <button type="button" class="ai-chip-btn" data-prompt="Clean up wine descriptions and assign proper Wine / Spirits / Beer categories">Categorize Items</button>
+        </div>
+      </div>
+
+      <!-- Undo Banner -->
+      <div id="aiUndoBanner" class="ai-undo-banner" style="display:none;">
+        <span id="aiUndoText">Applied modifications to dataset.</span>
+        <button id="btnUndoAiChanges" type="button" class="btn-secondary btn-sm">↩️ Undo AI Changes</button>
+      </div>
+
+      <!-- Messages Thread -->
+      <div id="aiMessagesList" class="ai-messages-list">
+        <div class="ai-msg ai-msg-assistant">
+          <div class="ai-msg-sender">🤖 Gemini Assistant</div>
+          <div>Hello! I can help you format your inventory dataset, title-case brand names, normalize bottle sizes (750ml, 1.75L), fix pack sizes, and organize categories for Toast POS. Select a quick preset above or type your custom instruction below.</div>
+        </div>
+      </div>
+
+      <!-- Diff Comparison Container -->
+      <div id="aiDiffSection" class="ai-diff-card" style="display:none;">
+        <div class="ai-diff-header">
+          <h3 class="ai-diff-title">
+            <span>📋 Proposed Dataset Changes</span>
+            <span id="aiDiffCountBadge" class="status-pill" style="font-size:11px;padding:2px 8px;">0 items</span>
+          </h3>
+        </div>
+        <p id="aiDiffSummary" class="small text-muted" style="margin:0;">Review proposed before-and-after values below before applying to your inventory dataset.</p>
+        <div class="ai-diff-table-scroll">
+          <table class="ai-diff-table">
+            <thead>
+              <tr>
+                <th>Item</th>
+                <th>Field</th>
+                <th>Original</th>
+                <th>Proposed</th>
+                <th>Reason</th>
+              </tr>
+            </thead>
+            <tbody id="aiDiffTableBody"></tbody>
+          </table>
+        </div>
+        <div class="ai-diff-actions">
+          <button id="btnApproveAiDiff" type="button" class="btn-toast">
+            <span>✅ Approve &amp; Apply to Dataset</span>
+          </button>
+          <button id="btnDiscardAiDiff" type="button" class="btn-secondary btn-sm">
+            <span>✕ Discard</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div class="ai-drawer-footer">
+      <div class="ai-input-row">
+        <textarea id="aiPromptInput" class="ai-textarea" rows="2" placeholder="Ask Gemini to format, title-case, or organize your catalog..."></textarea>
+        <button id="btnSendAiPrompt" type="button" class="btn-ai-send">
+          <span id="btnSendAiText">Send</span>
+        </button>
+      </div>
+      <div class="small text-muted" style="font-size:11px;display:flex;justify-content:space-between;">
+        <span>Changes previewed with full diff before committing.</span>
+        <span>Shortcut: <strong>Alt + A</strong></span>
+      </div>
+    </div>
+  </aside>
 </main>
 <script type="module" src="app.js"></script>
 </body>

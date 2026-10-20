@@ -58,3 +58,82 @@ export function analyzeBarcode(raw) {
   }
   return result({ ...base, status: 'invalid', reason: `Length ${digits.length} is not a retail GTIN; may be an internal code` });
 }
+
+export function isPaddingAnomaly(raw) {
+  const original = String(raw ?? '').trim();
+  if (!original) return false;
+  let digits = original;
+  if (/[eE]/.test(original)) {
+    const exp = expandScientific(original);
+    if (exp) digits = exp;
+    else return false;
+  } else if (/^\d+\.0+$/.test(original)) {
+    digits = original.split('.')[0];
+  }
+  if (!/^\d+$/.test(digits)) return false;
+  return digits.length >= 8 && digits.length < 13;
+}
+
+export function padTo13(raw) {
+  const original = String(raw ?? '').trim();
+  if (!original) return '';
+  let digits = original;
+  if (/[eE]/.test(original)) {
+    const exp = expandScientific(original);
+    if (exp) digits = exp;
+    else return original;
+  } else if (/^\d+\.0+$/.test(original)) {
+    digits = original.split('.')[0];
+  }
+  if (!/^\d+$/.test(digits)) return original;
+  if (digits.length < 13) {
+    return digits.padStart(13, '0');
+  }
+  return digits;
+}
+
+export function findPaddingAnomalies(items) {
+  if (!Array.isArray(items)) return [];
+  return items.filter((item) => {
+    const raw = item?.barcode?.digits || item?.barcode?.original || item?.barcode;
+    return isPaddingAnomaly(raw);
+  });
+}
+
+export function autoPadBarcodes13(records, rows = []) {
+  if (!Array.isArray(records)) return { totalChecked: 0, paddedCount: 0, validEan13Count: 0, updated: [] };
+  let paddedCount = 0;
+  let validEan13Count = 0;
+  const updated = [];
+
+  records.forEach((rec, idx) => {
+    const raw = rec.barcode;
+    if (isPaddingAnomaly(raw)) {
+      const padded = padTo13(raw);
+      const analysis = analyzeBarcode(padded);
+      const prev = rec.barcode;
+      rec.barcode = padded;
+      paddedCount++;
+      if (analysis.structurallyValid && (analysis.type === 'EAN-13' || analysis.type === 'UPC-A')) {
+        validEan13Count++;
+      }
+      updated.push({
+        index: idx,
+        id: rows[idx]?.id || `r${idx + 1}`,
+        name: rec.name,
+        originalBarcode: prev,
+        newBarcode: padded,
+        valid: analysis.structurallyValid,
+        type: analysis.type
+      });
+    }
+  });
+
+  return {
+    totalChecked: records.length,
+    paddedCount,
+    validEan13Count,
+    updated
+  };
+}
+

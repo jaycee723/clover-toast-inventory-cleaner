@@ -38,6 +38,18 @@ import {
   showGooglePicker,
 } from './src/workspace.js';
 import { parseCsv } from './src/csv.js';
+import {
+  isPaddingAnomaly,
+  padTo13,
+  findPaddingAnomalies,
+  autoPadBarcodes13
+} from './src/barcode.js';
+import {
+  prepareDatasetForAi,
+  computeDiffPreview,
+  applyAiChanges,
+  revertAiChanges
+} from './src/ai_assistant.js';
 
 const $ = (id) => (typeof document !== 'undefined' && document.getElementById ? document.getElementById(id) : null);
 const bindClick = (id, fn) => {
@@ -52,7 +64,25 @@ const setText = (id, txt) => {
   const el = $(id);
   if (el) el.textContent = txt;
 };
-const S = { records: [], canonical: [], refs: [], rows: [], aliases: [], page: 1, size: 25, filter: 'all', offCache: new Map(), abort: null };
+const setDisplay = (idOrEl, val) => {
+  const el = typeof idOrEl === 'string' ? $(idOrEl) : idOrEl;
+  if (el && el.style) el.style.display = val;
+};
+const S = {
+  records: [],
+  canonical: [],
+  refs: [],
+  rows: [],
+  aliases: [],
+  page: 1,
+  size: 25,
+  filter: 'all',
+  offCache: new Map(),
+  abort: null,
+  paddingSnapshot: null,
+  currentAiChanges: [],
+  lastAiUndoSnapshot: null
+};
 
 const escapeHtml = (str) => String(str ?? '').replace(/[&<>"']/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[m]);
 
@@ -282,11 +312,60 @@ function updateToastStats() {
   }
 }
 
+function updateBarcodePaddingUI() {
+  const banner = $('barcodePaddingBanner');
+  if (!banner) return;
+  if (!S.records || !S.records.length) {
+    setDisplay(banner, 'none');
+    return;
+  }
+  const anomalies = findPaddingAnomalies(S.records);
+  const statusEl = $('barcodePadStatusText');
+  const undoBtn = $('btnUndoPad13');
+  const padBtn = $('btnAutoPad13');
+  const reviewPadBtn = $('btnAutoPadReview');
+
+  if (anomalies.length > 0) {
+    setDisplay(banner, 'flex');
+    if (statusEl) {
+      statusEl.innerHTML = `Found <strong>${anomalies.length}</strong> barcode${anomalies.length === 1 ? '' : 's'} with missing leading zeros (under 13 digits, e.g. stripped by Excel).`;
+    }
+    if (padBtn) {
+      setDisplay(padBtn, 'inline-flex');
+      padBtn.innerHTML = `<span>🔢 Auto-pad all barcodes to 13 digits (${anomalies.length})</span>`;
+    }
+    if (reviewPadBtn) {
+      reviewPadBtn.textContent = `🔢 Auto-pad all barcodes to 13 digits (${anomalies.length})`;
+      reviewPadBtn.disabled = false;
+    }
+    setDisplay(undoBtn, S.paddingSnapshot ? 'inline-flex' : 'none');
+  } else if (S.paddingSnapshot) {
+    setDisplay(banner, 'flex');
+    if (statusEl) {
+      statusEl.innerHTML = `<span>All eligible barcodes standardized to <strong>13 digits</strong> (EAN-13 standard).</span>`;
+    }
+    setDisplay(padBtn, 'none');
+    if (reviewPadBtn) {
+      reviewPadBtn.textContent = `All barcodes 13 digits`;
+      reviewPadBtn.disabled = true;
+    }
+    setDisplay(undoBtn, 'inline-flex');
+  } else {
+    setDisplay(banner, 'none');
+    if (reviewPadBtn) {
+      reviewPadBtn.textContent = `All barcodes 13 digits`;
+      reviewPadBtn.disabled = true;
+    }
+    setDisplay(undoBtn, 'none');
+  }
+}
+
 function updateSummary() {
   if (!S.rows.length) return;
   const s = summarize(S.rows);
   setText('status', `${s.total} items | ${s.approved} fully approved | ${s.needsReview} need review | ${s.contradictions} reference contradictions | ${s.duplicates} duplicate barcodes | ${s.invalidBarcodes} missing/invalid barcodes`);
   updateToastStats();
+  updateBarcodePaddingUI();
   setText('tabReviewCount', String(s.total));
   setText('tabRuleCount', `${S.aliases.filter((a) => a.approved).length} rules`);
   const t = summarizeToastReadiness(S.rows);
@@ -1426,5 +1505,277 @@ function initTabs() {
 }
 
 initTabs();
+
+// --- 13-Digit Barcode Auto-Padding Controls ---
+function onAutoPad13() {
+  if (!S.records || !S.records.length) {
+    if ($('status')) $('status').textContent = 'Please load an inventory file first.';
+    return;
+  }
+
+  // Preserve previous barcodes for single-click undo
+  S.paddingSnapshot = S.records.map((r) => r.barcode);
+
+  const res = autoPadBarcodes13(S.records, S.rows);
+  rebuild(true);
+  updateBarcodePaddingUI();
+
+  if ($('status')) {
+    $('status').textContent = `Standardized ${res.paddedCount} barcode(s) to 13 digits! ${res.validEan13Count} are verified valid EAN-13 barcodes.`;
+  }
+  if ($('toastStatus')) {
+    $('toastStatus').textContent = `Auto-padded ${res.paddedCount} barcodes to 13 digits. Toast export ready count updated.`;
+  }
+}
+
+function onUndoPad13() {
+  if (!S.paddingSnapshot || !S.records) return;
+  S.records.forEach((rec, idx) => {
+    if (S.paddingSnapshot[idx] !== undefined) {
+      rec.barcode = S.paddingSnapshot[idx];
+    }
+  });
+  S.paddingSnapshot = null;
+  rebuild(true);
+  updateBarcodePaddingUI();
+  if ($('status')) {
+    $('status').textContent = 'Reverted barcode padding changes to previous values.';
+  }
+}
+
+bindClick('btnAutoPad13', onAutoPad13);
+bindClick('btnAutoPadReview', onAutoPad13);
+bindClick('btnUndoPad13', onUndoPad13);
+
+// --- Gemini AI Assistant Drawer & Formatting ---
+function openAiDrawer() {
+  const drawer = $('aiDrawer');
+  const overlay = $('aiDrawerOverlay');
+  if (drawer) drawer.classList.add('open');
+  if (overlay) overlay.classList.add('open');
+  const input = $('aiPromptInput');
+  if (input) input.focus();
+}
+
+function closeAiDrawer() {
+  const drawer = $('aiDrawer');
+  const overlay = $('aiDrawerOverlay');
+  if (drawer) drawer.classList.remove('open');
+  if (overlay) overlay.classList.remove('open');
+}
+
+bindClick('openAiDrawerBtn', openAiDrawer);
+bindClick('closeAiDrawerBtn', closeAiDrawer);
+bindClick('aiDrawerOverlay', closeAiDrawer);
+
+// Keyboard shortcut Alt + A to toggle AI assistant
+if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
+  document.addEventListener('keydown', (e) => {
+    if (e.altKey && (e.key === 'a' || e.key === 'A')) {
+      e.preventDefault();
+      const drawer = $('aiDrawer');
+      if (drawer && drawer.classList && typeof drawer.classList.contains === 'function' && drawer.classList.contains('open')) {
+        closeAiDrawer();
+      } else {
+        openAiDrawer();
+      }
+    }
+  });
+}
+
+// Quick Prompt Chips
+if (typeof document !== 'undefined' && typeof document.querySelectorAll === 'function') {
+  const chips = document.querySelectorAll('.ai-chip-btn');
+  if (chips && typeof chips.forEach === 'function') {
+    chips.forEach((btn) => {
+      if (btn && typeof btn.addEventListener === 'function') {
+        btn.addEventListener('click', () => {
+          const prompt = typeof btn.getAttribute === 'function' ? btn.getAttribute('data-prompt') : '';
+          const input = $('aiPromptInput');
+          if (input && prompt) {
+            input.value = prompt;
+            if (typeof input.focus === 'function') input.focus();
+          }
+        });
+      }
+    });
+  }
+}
+
+function appendAiMessage(sender, text, isUser = false) {
+  const list = $('aiMessagesList');
+  if (!list) return;
+  const msg = document.createElement('div');
+  msg.className = `ai-msg ${isUser ? 'ai-msg-user' : 'ai-msg-assistant'}`;
+
+  const hdr = document.createElement('div');
+  hdr.className = 'ai-msg-sender';
+  hdr.textContent = isUser ? '👤 You' : '🤖 Gemini Assistant';
+
+  const body = document.createElement('div');
+  body.textContent = text;
+
+  msg.append(hdr, body);
+  list.append(msg);
+  list.scrollTop = list.scrollHeight;
+}
+
+function renderDiffSection(changes, summary) {
+  const sec = $('aiDiffSection');
+  const tbody = $('aiDiffTableBody');
+  const countBadge = $('aiDiffCountBadge');
+  const summaryEl = $('aiDiffSummary');
+  if (!sec || !tbody) return;
+
+  tbody.replaceChildren();
+
+  if (!changes || !changes.length) {
+    sec.style.display = 'none';
+    return;
+  }
+
+  const diffItems = computeDiffPreview(S.rows, changes);
+  diffItems.forEach((diff) => {
+    const tr = document.createElement('tr');
+
+    const tdItem = document.createElement('td');
+    tdItem.innerHTML = `<strong>${escapeHtml(diff.itemName)}</strong><div class="small text-muted">${escapeHtml(diff.id)}</div>`;
+
+    const tdField = document.createElement('td');
+    tdField.textContent = diff.field;
+
+    const tdOrig = document.createElement('td');
+    const del = document.createElement('span');
+    del.className = 'diff-del';
+    del.textContent = diff.originalValue || '(empty)';
+    tdOrig.append(del);
+
+    const tdProp = document.createElement('td');
+    const ins = document.createElement('span');
+    ins.className = 'diff-ins';
+    ins.textContent = diff.proposedValue || '(empty)';
+    tdProp.append(ins);
+
+    const tdReason = document.createElement('td');
+    tdReason.className = 'diff-reason';
+    tdReason.textContent = diff.reason;
+
+    tr.append(tdItem, tdField, tdOrig, tdProp, tdReason);
+    tbody.append(tr);
+  });
+
+  if (countBadge) countBadge.textContent = `${changes.length} item${changes.length === 1 ? '' : 's'}`;
+  if (summaryEl && summary) summaryEl.textContent = summary;
+  setDisplay(sec, 'flex');
+  if (sec && typeof sec.scrollIntoView === 'function') sec.scrollIntoView({ behavior: 'smooth' });
+}
+
+async function onSendAiPrompt() {
+  const input = $('aiPromptInput');
+  const prompt = (input?.value || '').trim();
+  if (!prompt) return;
+
+  const btn = $('btnSendAiPrompt');
+  const btnText = $('btnSendAiText');
+
+  appendAiMessage('You', prompt, true);
+  if (input) input.value = '';
+
+  if (!S.records || !S.records.length) {
+    appendAiMessage('Gemini Assistant', 'Please load an inventory CSV or Excel file in Step 1 first so I can analyze and format your catalog items.');
+    return;
+  }
+
+  if (btn) btn.disabled = true;
+  if (btnText) btnText.textContent = 'Thinking…';
+
+  try {
+    const payload = {
+      prompt,
+      items: prepareDatasetForAi(S.records, S.rows, 150)
+    };
+
+    const res = await fetch('/api/ai/format', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+
+    const data = await res.json();
+    if (!res.ok || !data.ok) {
+      throw new Error(data.error || 'Failed to process AI request');
+    }
+
+    appendAiMessage('Gemini Assistant', data.message || 'I have analyzed your items.');
+
+    if (data.changes && data.changes.length > 0) {
+      S.currentAiChanges = data.changes;
+      renderDiffSection(data.changes, data.summary);
+    } else {
+      S.currentAiChanges = [];
+      const sec = $('aiDiffSection');
+      setDisplay(sec, 'none');
+    }
+  } catch (err) {
+    console.error('AI assistant error:', err);
+    appendAiMessage('Gemini Assistant', `Error: ${err.message || 'Unable to communicate with Gemini cloud service.'}`);
+  } finally {
+    if (btn) btn.disabled = false;
+    if (btnText) btnText.textContent = 'Send';
+  }
+}
+
+bindClick('btnSendAiPrompt', onSendAiPrompt);
+const promptInput = $('aiPromptInput');
+if (promptInput && typeof promptInput.addEventListener === 'function') {
+  promptInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      onSendAiPrompt();
+    }
+  });
+}
+
+function onApproveAiDiff() {
+  if (!S.currentAiChanges || !S.currentAiChanges.length) return;
+  const result = applyAiChanges(S.records, S.rows, S.currentAiChanges);
+  S.lastAiUndoSnapshot = result.undoSnapshot;
+  S.currentAiChanges = [];
+
+  const sec = $('aiDiffSection');
+  setDisplay(sec, 'none');
+
+  const banner = $('aiUndoBanner');
+  const undoText = $('aiUndoText');
+  if (banner) {
+    setDisplay(banner, 'flex');
+    if (undoText) undoText.textContent = `Applied ${result.appliedCount} AI adjustment(s) to inventory.`;
+  }
+
+  appendAiMessage('Gemini Assistant', `✅ Approved and applied ${result.appliedCount} adjustment(s) to your dataset.`);
+  rebuild(true);
+}
+
+function onDiscardAiDiff() {
+  S.currentAiChanges = [];
+  const sec = $('aiDiffSection');
+  setDisplay(sec, 'none');
+  appendAiMessage('Gemini Assistant', 'Proposals discarded without modifying dataset.');
+}
+
+function onUndoAiChanges() {
+  if (!S.lastAiUndoSnapshot) return;
+  const count = revertAiChanges(S.records, S.rows, S.lastAiUndoSnapshot);
+  S.lastAiUndoSnapshot = null;
+  const banner = $('aiUndoBanner');
+  setDisplay(banner, 'none');
+
+  appendAiMessage('Gemini Assistant', `↩️ Successfully rolled back ${count} AI adjustment(s).`);
+  rebuild(true);
+}
+
+bindClick('btnApproveAiDiff', onApproveAiDiff);
+bindClick('btnDiscardAiDiff', onDiscardAiDiff);
+bindClick('btnUndoAiChanges', onUndoAiChanges);
 
 

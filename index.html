@@ -164,6 +164,9 @@
             </select>
           </label>
 
+          <button id="btnPreviewToast" type="button" class="btn-secondary">
+            👁️ Preview Toast CSV
+          </button>
           <button id="dlToast" type="button" class="btn-toast">
             Download Usable Toast Import File
           </button>
@@ -496,6 +499,54 @@
       </div>
     </div>
   </aside>
+
+  <!-- Toast CSV Preview Modal -->
+  <div id="toastPreviewModal" class="modal-overlay" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="toastPreviewTitle">
+    <div class="modal-box modal-box-large">
+      <div class="modal-header-row">
+        <div>
+          <h2 id="toastPreviewTitle" class="modal-title" style="margin:0;display:flex;align-items:center;gap:10px;">
+            <span>🍞 Toast POS Import CSV Preview</span>
+            <span id="toastPreviewFormatBadge" class="app-title-badge">Retail Catalog</span>
+          </h2>
+          <p id="toastPreviewMeta" class="small text-muted" style="margin:4px 0 0 0;">
+            Filename: <strong id="toastPreviewFilename" style="color:#fdba74;">toast_retail_import.csv</strong> • Ready rows: <strong id="toastPreviewCount" class="ok">0</strong>
+          </p>
+        </div>
+        <button id="modalCloseToastPreview" type="button" class="ai-drawer-close" aria-label="Close preview">✕</button>
+      </div>
+
+      <div class="toast-preview-toolbar">
+        <input id="toastPreviewSearch" type="search" placeholder="Filter preview rows (item name, barcode, SKU, category)…" class="toast-preview-search">
+        <div class="status-pill" style="font-size:11px;">
+          <span>Identity: <strong>Barcode mapped as SKU &amp; Barcode</strong></span>
+        </div>
+      </div>
+
+      <div class="toast-preview-scroll">
+        <table class="toast-preview-table">
+          <thead id="toastPreviewThead"></thead>
+          <tbody id="toastPreviewTbody"></tbody>
+          <tfoot id="toastPreviewTfoot"></tfoot>
+        </table>
+      </div>
+
+      <div class="modal-actions" style="margin-top:14px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
+        <span id="toastPreviewSearchStats" class="small text-muted">Showing all rows</span>
+        <div class="flex-wrap" style="gap:8px;">
+          <button id="modalCopyToastCsv" type="button" class="btn-outline btn-sm">
+            <span>📋 Copy CSV</span>
+          </button>
+          <button id="modalCancelToastPreview" type="button" class="btn-secondary btn-sm">
+            <span>Close</span>
+          </button>
+          <button id="modalConfirmDlToast" type="button" class="btn-toast">
+            <span>⬇️ Confirm &amp; Download CSV</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
 </main>
 <script type="module" src="app.js"></script>
 </body>

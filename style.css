@@ -444,6 +444,111 @@ tr:hover td {
 .modal-body { font-size: 14px; color: #cbd5e1; line-height: 1.5; margin-bottom: 20px; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 10px; }
 
+/* Large Table Preview Modal */
+.modal-box-large {
+  max-width: 1150px;
+  width: 95vw;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  background: #0f172a;
+  border: 1px solid #334155;
+  border-radius: 12px;
+  padding: 20px 24px;
+}
+.modal-header-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid #1e293b;
+}
+.toast-preview-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.toast-preview-search {
+  flex: 1;
+  min-width: 240px;
+  background: #1e293b;
+  border: 1px solid #334155;
+  color: #fff;
+  border-radius: 6px;
+  padding: 7px 12px;
+  font-size: 13px;
+}
+.toast-preview-search:focus {
+  outline: none;
+  border-color: #f97316;
+}
+.toast-preview-scroll {
+  flex: 1;
+  overflow-x: auto;
+  overflow-y: auto;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  background: #0b0f19;
+  min-height: 250px;
+  max-height: 55vh;
+}
+.toast-preview-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.toast-preview-table th {
+  background: #1e293b;
+  color: #94a3b8;
+  font-weight: 600;
+  text-align: left;
+  padding: 8px 12px;
+  border-bottom: 1px solid #334155;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+.toast-preview-table td {
+  padding: 7px 12px;
+  border-bottom: 1px solid #1e293b;
+  color: #e2e8f0;
+}
+.toast-preview-table tr:hover td {
+  background: rgba(249, 115, 22, 0.08);
+}
+.toast-preview-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  color: #38bdf8;
+  background: rgba(56, 189, 248, 0.1);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+}
+.toast-preview-price {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-weight: 600;
+  color: #4ade80;
+}
+.toast-preview-table tfoot {
+  position: sticky;
+  bottom: 0;
+  z-index: 10;
+}
+.toast-preview-summary-row td {
+  background: #1e293b;
+  border-top: 2px solid #3b82f6;
+  border-bottom: none;
+  color: #f8fafc;
+  font-weight: 600;
+  padding: 10px 12px;
+  box-shadow: 0 -4px 10px rgba(0, 0, 0, 0.4);
+}
+
 @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 @keyframes scaleIn { from { transform: scale(0.96); opacity: 0; } to { transform: scale(1); opacity: 1; } }
 

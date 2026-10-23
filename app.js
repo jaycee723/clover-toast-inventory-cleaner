@@ -8,6 +8,7 @@ import {
   summarizeToastReadiness,
   validateToastRow,
   getBarcodeIdentity,
+  computeToastPreviewSummary,
   TOAST_RETAIL_HEADERS,
   TOAST_MENU_HEADERS
 } from './src/toast.js';
@@ -569,44 +570,228 @@ bindClick('offCancel', () => {
   S.abort?.abort();
   setText('offProgress', 'Cancelled');
 });
-const dlToastBtn = $('dlToast');
-if (dlToastBtn) {
-  dlToastBtn.onclick = () => {
-    try {
-      if (!S.rows.length) throw new Error('No inventory loaded. Load files in Step 1 first.');
-      const format = $('toastFormat')?.value || 'retail';
-      const scope = $('toastScope')?.value || 'approved';
-      const onlyApproved = scope === 'approved';
 
-      const toastTable = exportToastRows(S.rows, {
-        format,
-        onlyApproved,
+export { computeToastPreviewSummary };
+
+export function renderToastPreviewRows(filterQuery = '') {
+  const tbody = $('toastPreviewTbody');
+  if (!tbody || !S.previewToastData) return;
+  tbody.replaceChildren();
+
+  const q = String(filterQuery || '').trim().toLowerCase();
+  const allRows = S.previewToastData.rows || [];
+  const headers = S.previewToastData.headers || [];
+
+  const matched = q
+    ? allRows.filter((row) => row.some((cell) => String(cell || '').toLowerCase().includes(q)))
+    : allRows;
+
+  matched.forEach((row) => {
+    const tr = document.createElement('tr');
+    row.forEach((val, colIdx) => {
+      const td = document.createElement('td');
+      const headerName = headers[colIdx] || '';
+      const text = String(val ?? '');
+
+      if (headerName === 'SKU' || headerName === 'Barcode') {
+        const codeSpan = document.createElement('span');
+        codeSpan.className = 'toast-preview-code';
+        codeSpan.textContent = text || '(empty)';
+        td.append(codeSpan);
+      } else if (headerName === 'Price' || headerName === 'Cost') {
+        const priceSpan = document.createElement('span');
+        priceSpan.className = 'toast-preview-price';
+        priceSpan.textContent = text ? `$${text}` : '';
+        td.append(priceSpan);
+      } else {
+        td.textContent = text;
+      }
+      tr.append(td);
+    });
+    tbody.append(tr);
+  });
+
+  // Calculate and render summary row in tfoot
+  const summary = computeToastPreviewSummary(headers, matched);
+  const tfoot = $('toastPreviewTfoot');
+  if (tfoot) {
+    tfoot.replaceChildren();
+    const trFoot = document.createElement('tr');
+    trFoot.className = 'toast-preview-summary-row';
+
+    const priceColIdx = headers.findIndex((h) => String(h || '').trim().toLowerCase() === 'price');
+    const nameColIdx = headers.findIndex((h) => String(h || '').trim().toLowerCase() === 'name');
+
+    headers.forEach((h, colIdx) => {
+      const td = document.createElement('td');
+      if (colIdx === nameColIdx || (nameColIdx === -1 && colIdx === 0)) {
+        td.innerHTML = `<strong>Total Items: ${summary.totalCount}</strong>`;
+      } else if (colIdx === 0 && nameColIdx > 0) {
+        td.innerHTML = '<strong>Summary</strong>';
+      } else if (colIdx === priceColIdx) {
+        td.innerHTML = `<strong>Avg Price: <span class="toast-preview-price">$${summary.avgPrice}</span></strong>`;
+      } else {
+        td.textContent = '';
+      }
+      trFoot.append(td);
+    });
+    tfoot.append(trFoot);
+  }
+
+  const stats = $('toastPreviewSearchStats');
+  if (stats) {
+    if (q) {
+      stats.textContent = `Showing ${matched.length} of ${allRows.length} items (Avg Price: $${summary.avgPrice}) • Filtered by "${q}"`;
+    } else {
+      stats.textContent = `Showing all ${allRows.length} items • Avg Price: $${summary.avgPrice}`;
+    }
+  }
+}
+
+export function openToastPreviewModal({ format, scope } = {}) {
+  try {
+    if (!S.rows || !S.rows.length) {
+      throw new Error('No inventory loaded. Load files in Step 1 first.');
+    }
+
+    const fmt = format || $('toastFormat')?.value || $('heroToastFormat')?.value || 'retail';
+    const scp = scope || $('toastScope')?.value || 'approved';
+    const onlyApproved = scp === 'approved';
+
+    let toastTable = exportToastRows(S.rows, {
+      format: fmt,
+      onlyApproved,
+      strictBarcodes: true
+    });
+
+    if (toastTable.length <= 1 && onlyApproved) {
+      const allValidTable = exportToastRows(S.rows, {
+        format: fmt,
+        onlyApproved: false,
         strictBarcodes: true
       });
-
-      const itemCount = toastTable.length - 1;
-      if (itemCount <= 0) {
-        const why = onlyApproved
-          ? 'No items are both fully approved and possess a valid barcode identity. Review and approve items in Section 4 first.'
-          : 'No items possess a valid barcode identity. Toast requires barcode as the product identity.';
-        throw new Error(why);
+      if (allValidTable.length > 1) {
+        throw new Error(`0 items are marked "approved", but ${allValidTable.length - 1} items have valid barcodes. Switch Scope to "All items with valid barcode identity" or click "Auto-Approve All Ready Items".`);
       }
-
-      const dateStr = new Date().toISOString().slice(0, 10);
-      const filename = format === 'retail'
-        ? `toast_retail_import_${dateStr}.csv`
-        : `toast_menu_import_${dateStr}.csv`;
-
-      download(filename, toCsv(toastTable));
-
-      const statusEl = $('toastStatus');
-      if (statusEl) {
-        statusEl.textContent = `Generated ${filename} with ${itemCount} items ready for Toast import (Barcode used as SKU & Barcode product identity).`;
-      }
-    } catch (e) {
-      fail('toastStatus', e);
     }
-  };
+
+    const itemCount = toastTable.length - 1;
+    if (itemCount <= 0) {
+      const why = onlyApproved
+        ? 'No items are both fully approved and possess a valid barcode identity. Review and approve items in Section 4 first.'
+        : 'No items possess a valid barcode identity. Toast requires barcode as the product identity.';
+      throw new Error(why);
+    }
+
+    const dateStr = new Date().toISOString().slice(0, 10);
+    const filename = fmt === 'retail'
+      ? `toast_retail_import_${dateStr}.csv`
+      : `toast_menu_import_${dateStr}.csv`;
+
+    S.previewToastData = {
+      format: fmt,
+      filename,
+      table: toastTable,
+      headers: toastTable[0],
+      rows: toastTable.slice(1)
+    };
+
+    setText('toastPreviewFilename', filename);
+    setText('toastPreviewCount', `${itemCount} item${itemCount === 1 ? '' : 's'}`);
+    setText('toastPreviewFormatBadge', fmt === 'retail' ? 'Toast Retail Catalog' : 'Toast Menu Bulk Import');
+
+    const searchInput = $('toastPreviewSearch');
+    if (searchInput) searchInput.value = '';
+
+    const thead = $('toastPreviewThead');
+    if (thead) {
+      thead.replaceChildren();
+      const tr = document.createElement('tr');
+      toastTable[0].forEach((colName) => {
+        const th = document.createElement('th');
+        th.textContent = colName;
+        tr.append(th);
+      });
+      thead.append(tr);
+    }
+
+    renderToastPreviewRows('');
+    setDisplay('toastPreviewModal', 'flex');
+
+    if ($('toastStatus')) {
+      $('toastStatus').textContent = `Previewing ${filename} with ${itemCount} items ready for Toast POS.`;
+    }
+  } catch (err) {
+    fail('toastStatus', err);
+    if ($('status')) $('status').textContent = err.message || String(err);
+  }
+}
+
+export function closeToastPreviewModal() {
+  setDisplay('toastPreviewModal', 'none');
+}
+
+export function downloadToastPreview() {
+  if (!S.previewToastData || !S.previewToastData.table) return;
+  const { filename, table } = S.previewToastData;
+  const csvContent = toCsv(table);
+  download(filename, csvContent);
+  closeToastPreviewModal();
+
+  const itemCount = table.length - 1;
+  const statusEl = $('toastStatus');
+  if (statusEl) {
+    statusEl.textContent = `Generated ${filename} with ${itemCount} items ready for Toast import (Barcode used as SKU & Barcode product identity).`;
+  }
+}
+
+async function copyToastPreviewCsv() {
+  if (!S.previewToastData || !S.previewToastData.table) return;
+  const csvContent = toCsv(S.previewToastData.table);
+  const btn = $('modalCopyToastCsv');
+  try {
+    if (typeof navigator !== 'undefined' && navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(csvContent);
+    } else {
+      const ta = document.createElement('textarea');
+      ta.value = csvContent;
+      if (document.body) document.body.appendChild(ta);
+      ta.select();
+      if (document.execCommand) document.execCommand('copy');
+      if (document.body) document.body.removeChild(ta);
+    }
+    if (btn) {
+      const orig = btn.innerHTML;
+      btn.innerHTML = '<span>✓ Copied!</span>';
+      setTimeout(() => { btn.innerHTML = orig; }, 1800);
+    }
+  } catch (err) {
+    console.warn('Clipboard copy failed:', err);
+  }
+}
+
+bindClick('btnPreviewToast', () => openToastPreviewModal());
+bindClick('dlToast', () => openToastPreviewModal());
+bindClick('modalCloseToastPreview', closeToastPreviewModal);
+bindClick('modalCancelToastPreview', closeToastPreviewModal);
+bindClick('modalConfirmDlToast', downloadToastPreview);
+bindClick('modalCopyToastCsv', copyToastPreviewCsv);
+
+const previewSearchInput = $('toastPreviewSearch');
+if (previewSearchInput && typeof previewSearchInput.addEventListener === 'function') {
+  previewSearchInput.addEventListener('input', (e) => {
+    const val = e && e.target ? e.target.value : '';
+    renderToastPreviewRows(val);
+  });
+}
+
+const previewModalOverlay = $('toastPreviewModal');
+if (previewModalOverlay && typeof previewModalOverlay.addEventListener === 'function') {
+  previewModalOverlay.addEventListener('click', (e) => {
+    if (e.target === previewModalOverlay) {
+      closeToastPreviewModal();
+    }
+  });
 }
 
 const btnValidateToast = $('btnValidateToast');
@@ -1458,13 +1643,16 @@ if (btnOneClickAuto) {
           • Exported <strong>${itemCount}</strong> items with unique barcode identities (SKU &amp; Barcode) ready for Toast POS!
         </div>
         <div class="flex-wrap" style="gap:8px;">
-          <button id="directDlBtn" type="button" class="btn-toast btn-sm">⬇️ Download "${escapeHtml(filename)}"</button>
+          <button id="directDlBtn" type="button" class="btn-toast btn-sm">⬇️ Re-Download "${escapeHtml(filename)}"</button>
+          <button id="previewToastFromHeroBtn" type="button" class="btn-outline btn-sm">👁️ Preview Toast CSV</button>
           <button id="jumpToReviewBtn" type="button" class="btn-secondary btn-sm">📋 Inspect in Table</button>
         </div>
       `);
 
       const directBtn = $('directDlBtn');
       if (directBtn) directBtn.onclick = () => download(filename, csvContent);
+      const previewHeroBtn = $('previewToastFromHeroBtn');
+      if (previewHeroBtn) previewHeroBtn.onclick = () => openToastPreviewModal({ format, scope: 'allValid' });
       const jumpBtn = $('jumpToReviewBtn');
       if (jumpBtn) {
         jumpBtn.onclick = () => {

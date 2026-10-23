@@ -252,3 +252,36 @@ export function summarizeToastReadiness(rows) {
     missingCategory
   };
 }
+
+/**
+ * Computes summary stats (total item count, price count, total price, average price)
+ * for the Toast CSV preview table footer.
+ */
+export function computeToastPreviewSummary(headers = [], rows = []) {
+  const totalCount = rows.length;
+  const priceColIdx = headers.findIndex((h) => String(h || '').trim().toLowerCase() === 'price');
+  let totalPrice = 0;
+  let priceCount = 0;
+
+  if (priceColIdx !== -1) {
+    for (const r of rows) {
+      const raw = String(r[priceColIdx] ?? '').replace(/[^0-9.]/g, '');
+      if (raw !== '') {
+        const p = parseFloat(raw);
+        if (!Number.isNaN(p)) {
+          totalPrice += p;
+          priceCount++;
+        }
+      }
+    }
+  }
+
+  const avgPrice = priceCount > 0 ? (totalPrice / priceCount).toFixed(2) : '0.00';
+  return {
+    totalCount,
+    priceCount,
+    totalPrice: totalPrice.toFixed(2),
+    avgPrice
+  };
+}
+

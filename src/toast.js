@@ -32,6 +32,20 @@ export const TOAST_MENU_HEADERS = [
   'Description'
 ];
 
+export const TOAST_ONBOARDING_HEADERS = [
+  'Item Name',
+  'Description',
+  'Sales Category',
+  'Price',
+  'Cost',
+  'SKU',
+  'Barcode',
+  'Unit of Measure',
+  'Brand',
+  'Supplier',
+  'Supplier Item ID'
+];
+
 /**
  * Extracts the canonical barcode string to use as Toast product identity.
  * Preserves leading zeroes for UPC-A, expands UPC-E if necessary, and returns clean digits.
@@ -178,6 +192,37 @@ export function buildToastMenuRow(row) {
 }
 
 /**
+ * Constructs a row for the official Toast Onboarding Consultant Template.
+ */
+export function buildToastOnboardingRow(row) {
+  const f = finalValues(row);
+  const barcode = getBarcodeIdentity(row);
+  const name = (f.name || row.current_name || '').trim();
+  const category = (f.category || row.category || '').trim() || 'General Retail';
+  const price = formatToastPrice(row.price);
+  const cost = formatToastPrice(row.cost);
+  const brand = row.brand || row.reference?.brand || '';
+  const desc = row.description || row.reference?.variant || (row.name_source ? `Identified via ${row.name_source}` : '');
+  const uom = row.unit || 'EA';
+  const supplier = row.supplier || '';
+  const supplierItemId = row.supplierItemId || '';
+
+  return [
+    name,
+    desc,
+    category,
+    price,
+    cost,
+    barcode,   // SKU
+    barcode,   // Barcode
+    uom,
+    brand,
+    supplier,
+    supplierItemId
+  ];
+}
+
+/**
  * Exports rows into the chosen Toast format.
  */
 export function exportToastRows(rows, { format = 'retail', onlyApproved = true, strictBarcodes = true } = {}) {
@@ -195,8 +240,9 @@ export function exportToastRows(rows, { format = 'retail', onlyApproved = true, 
   }
 
   const isMenu = format === 'menu';
-  const header = isMenu ? TOAST_MENU_HEADERS : TOAST_RETAIL_HEADERS;
-  const builder = isMenu ? buildToastMenuRow : buildToastRetailRow;
+  const isOnboarding = format === 'onboarding';
+  const header = isOnboarding ? TOAST_ONBOARDING_HEADERS : (isMenu ? TOAST_MENU_HEADERS : TOAST_RETAIL_HEADERS);
+  const builder = isOnboarding ? buildToastOnboardingRow : (isMenu ? buildToastMenuRow : buildToastRetailRow);
 
   return [header, ...filtered.map(builder)];
 }

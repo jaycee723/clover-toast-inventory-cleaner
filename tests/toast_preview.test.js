@@ -107,3 +107,36 @@ test('computeToastPreviewSummary handles empty rows and missing price column gra
   assert.equal(noPriceSummary.totalPrice, '0.00');
   assert.equal(noPriceSummary.avgPrice, '0.00');
 });
+
+test('exportToastRows produces header and item rows matching Toast Onboarding Consultant template', () => {
+  const rows = buildRows([
+    {
+      name: "Tito's Handmade Vodka 750ml",
+      barcode: '012000161155',
+      price: '24.99',
+      cost: '18.00',
+      category: 'Spirits',
+      brand: "Tito's",
+      supplier: "Southern Glazer's",
+      supplierItemId: 'SG-101'
+    }
+  ]);
+  rows[0].decisions.barcode = 'accept';
+
+  const table = exportToastRows(rows, { format: 'onboarding', onlyApproved: false });
+  assert.equal(table.length, 2);
+  assert.equal(table[0][0], 'Item Name');
+  assert.equal(table[0][1], 'Description');
+  assert.equal(table[0][2], 'Sales Category');
+  assert.equal(table[0][5], 'SKU');
+  assert.equal(table[0][6], 'Barcode');
+
+  const r = table[1];
+  assert.equal(r[0], "Tito's Handmade Vodka 750ml");
+  assert.equal(r[2], 'Spirits');
+  assert.equal(r[3], '24.99');
+  assert.equal(r[4], '18.00');
+  assert.equal(r[5], '012000161155');
+  assert.equal(r[6], '012000161155');
+  assert.equal(r[8], "Tito's");
+});

@@ -3,10 +3,10 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Inventory identity review</title>
-  <meta name="description" content="In-browser Clover to Toast inventory review, barcode identity matching, and cleaning tool.">
-  <meta property="og:title" content="Inventory identity review">
-  <meta property="og:description" content="In-browser Clover to Toast inventory review, barcode identity matching, and cleaning tool.">
+  <title>Clover to Toast Retail Import Studio</title>
+  <meta name="description" content="Turn messy Clover POS spreadsheets into 100% compliant Toast import files and consultant templates.">
+  <meta property="og:title" content="Clover to Toast Retail Import Studio">
+  <meta property="og:description" content="Turn messy Clover POS spreadsheets into 100% compliant Toast import files and consultant templates.">
   <link rel="stylesheet" href="style.css">
   <script type="importmap">
   {
@@ -25,488 +25,466 @@
     <div class="app-title-group">
       <h1>
         <span>🍀 Clover → 🍞 Toast</span>
-        <span class="app-title-badge">Retail POS Ready</span>
+        <span class="app-title-badge">Retail Import Studio</span>
       </h1>
       <p class="note" style="margin:0;">
-        Transforms messy POS exports into validated <strong>Toast import files</strong> using <strong>barcode as the product identity</strong>. All processing happens safely inside your browser.
+        Transform messy Clover POS spreadsheets into 100% compliant Toast import files using <strong>barcode as the product identity</strong>.
       </p>
     </div>
     <div class="auth-bar">
-      <button id="openAiDrawerBtn" type="button" class="btn-ai-assistant">
-        <span>✨ Gemini AI Assistant</span>
-        <span class="ai-badge">Free Cloud</span>
+      <button id="toggleAiCompanionBtn" type="button" class="btn-ai-assistant">
+        <span>✨ Gemini Copilot</span>
+        <span class="ai-badge">Flash 3.8</span>
       </button>
       <span id="userStatus" class="status-pill">Not signed in</span>
       <button id="authBtn" type="button" class="btn-secondary btn-sm">Sign in with Google</button>
     </div>
   </header>
 
-  <!-- 1-Click Hero Banner: Unified Process -->
-  <div class="hero-card">
-    <div class="hero-content">
-      <div class="hero-header">
-        <div>
-          <h2 class="hero-title">⚡ 1-Click Auto Clean &amp; Toast POS Export</h2>
-          <p class="hero-subtitle">
-            Combines parsing Clover exports, normalizing units/brands, validating barcodes, auto-approving clean items, and generating your actual <strong>Toast POS import CSV</strong> with <strong>barcode as the product identity</strong>.
-          </p>
-        </div>
-        <div id="toastOverallBadge" class="toast-badge-warn">0 ready for Toast</div>
-      </div>
-
-      <div id="dropzone" class="dropzone" style="margin-bottom:14px;">
-        <span class="dropzone-icon">📥</span>
-        <div class="dropzone-title">Drop your Clover inventory file here, or click to browse</div>
-        <div class="dropzone-sub">Supports <strong>.xlsx</strong> and <strong>.csv</strong> spreadsheets exported from Clover POS</div>
-        <input id="file" type="file" accept=".csv,.xlsx" aria-label="Choose Clover inventory file">
-      </div>
-
-      <div class="hero-action-row" style="justify-content:space-between;">
-        <div class="flex-wrap" style="align-items:center;">
-          <button id="btnOneClickAuto" type="button" class="btn-auto-process">
-            <span>🚀 Auto-Clean &amp; Download Toast File</span>
-          </button>
-          <button id="load" type="button" class="btn-secondary btn-sm" title="Only load file into table without auto-downloading">
-            Load file only
-          </button>
-        </div>
-
-        <div class="flex-wrap" style="align-items:center;">
-          <label class="small text-muted" style="margin:0;">Target Format:
-            <select id="heroToastFormat" style="padding:4px 8px;font-size:12px;">
-              <option value="retail">Toast Retail Item Catalog (.csv)</option>
-              <option value="menu">Toast Menu Bulk Import (.csv)</option>
-            </select>
-          </label>
-        </div>
-      </div>
-
-      <!-- 13-Digit Barcode Auto-Padding Banner -->
-      <div id="barcodePaddingBanner" class="barcode-pad-banner" style="display:none;">
-        <div class="barcode-pad-info">
-          <span class="barcode-pad-badge">Padding Check</span>
-          <span id="barcodePadStatusText">Found <strong>0</strong> barcodes missing leading zeros (under 13 digits)</span>
-        </div>
-        <div class="flex-wrap" style="align-items:center;">
-          <button id="btnAutoPad13" type="button" class="btn-pad-action">
-            <span>🔢 Auto-pad all barcodes to 13 digits</span>
-          </button>
-          <button id="btnUndoPad13" type="button" class="btn-secondary btn-sm" style="display:none;">
-            <span>↩️ Undo Padding</span>
-          </button>
-        </div>
-      </div>
-
-      <div id="autoProcessLog" style="display:none;margin-top:14px;background:rgba(0,0,0,0.5);border:1px solid #334155;border-radius:10px;padding:14px 18px;font-size:13px;line-height:1.6;"></div>
-      <p id="status" class="note" style="margin-top:10px;margin-bottom:0;"></p>
+  <!-- 4-Step Guided Wizard Stepper -->
+  <nav class="wizard-stepper" aria-label="Toast Import Steps">
+    <div class="stepper-step active" id="stepIndicator1" data-step="1">
+      <div class="step-num">1</div>
+      <div class="step-label">1. Upload Clover File</div>
     </div>
-  </div>
-
-  <!-- Navigation Tabs for Intuitive Sections -->
-  <nav class="nav-tabs" role="tablist">
-    <button type="button" class="nav-tab active" data-tab="tab-toast">
-      <span>🍞 Toast Export</span>
-      <span id="tabToastCount" class="tab-badge">Ready</span>
-    </button>
-    <button type="button" class="nav-tab" data-tab="tab-review">
-      <span>📋 Review &amp; Table</span>
-      <span id="tabReviewCount" class="tab-badge">0</span>
-    </button>
-    <button type="button" class="nav-tab" data-tab="tab-spellcheck">
-      <span>✨ Spelling &amp; Terms</span>
-      <span id="tabRuleCount" class="tab-badge">0 rules</span>
-    </button>
-    <button type="button" class="nav-tab" data-tab="tab-workspace">
-      <span>☁️ Google Workspace &amp; Cloud</span>
-    </button>
+    <div class="stepper-line" id="stepperLine1"></div>
+    <div class="stepper-step" id="stepIndicator2" data-step="2">
+      <div class="step-num">2</div>
+      <div class="step-label">2. Smart Autopilot Clean</div>
+    </div>
+    <div class="stepper-line" id="stepperLine2"></div>
+    <div class="stepper-step" id="stepIndicator3" data-step="3">
+      <div class="step-num">3</div>
+      <div class="step-label">3. Confident Review &amp; Tuning</div>
+    </div>
+    <div class="stepper-line" id="stepperLine3"></div>
+    <div class="stepper-step" id="stepIndicator4" data-step="4">
+      <div class="step-num">4</div>
+      <div class="step-label">4. Export &amp; Consultant Handoff</div>
+    </div>
   </nav>
 
-  <!-- TAB 1: Toast POS Import File & Exports -->
-  <div id="tab-toast" class="tab-pane active">
-    <section id="toastSection">
-      <h2>Toast POS Import File &amp; Readiness</h2>
-      <p class="note">
-        Toast POS Retail items are uniquely identified by barcode. This file populates both <strong>SKU</strong> and <strong>Barcode</strong> with preserved leading zeros, clean item names, and retail pricing.
-      </p>
+  <!-- Workspace 2-Column Grid: Left Wizard Views + Right Gemini AI Companion -->
+  <div class="workspace-layout">
+    <!-- Left Column: Active Step Stage -->
+    <div class="wizard-content-panel">
 
-      <div class="toast-panel">
-        <div class="toast-stat-grid" id="toastStatsGrid">
-          <div class="toast-stat-chip">
-            <span class="small text-muted">Ready with Barcode Identity:</span>
-            <strong id="toastReadyCount" class="ok">0</strong>
+      <!-- STEP 1: Upload Clover File -->
+      <section id="stepPane1" class="wizard-pane">
+        <div class="wizard-pane-header">
+          <h2 class="wizard-pane-title">
+            <span>📥 Step 1: Upload Clover Inventory File</span>
+          </h2>
+          <p class="wizard-pane-desc">
+            Select or drag and drop your exported inventory spreadsheet from Clover POS (supports <code>.xlsx</code> and <code>.csv</code>).
+          </p>
+        </div>
+
+        <div id="dropzone" class="dropzone" style="margin-bottom:16px;">
+          <span class="dropzone-icon">📁</span>
+          <div class="dropzone-title">Drop your Clover inventory file here, or click to browse</div>
+          <div class="dropzone-sub">Supports <strong>.xlsx</strong> and <strong>.csv</strong> files exported from Clover POS</div>
+          <input id="file" type="file" accept=".csv,.xlsx" aria-label="Choose Clover inventory file">
+        </div>
+
+        <div class="flex-wrap" style="align-items:center;justify-content:space-between;margin-bottom:14px;">
+          <div class="flex-wrap" style="align-items:center;gap:10px;">
+            <button id="load" type="button" class="btn-secondary btn-sm">Read &amp; Load File</button>
+            <button id="btnLoadSample" type="button" class="btn-outline btn-sm">⚡ Load Sample 777 Liquor Store Catalog</button>
           </div>
-          <div class="toast-stat-chip">
-            <span class="small text-muted">Pending Decisions:</span>
-            <strong id="toastPendingCount" class="small">0</strong>
+          <div class="small text-muted" id="fileStatusSub">No file loaded yet</div>
+        </div>
+
+        <!-- 13-Digit Barcode Auto-Padding Banner -->
+        <div id="barcodePaddingBanner" class="barcode-pad-banner" style="display:none;margin-bottom:14px;">
+          <div class="barcode-pad-info">
+            <span class="barcode-pad-badge">Padding Check</span>
+            <span id="barcodePadStatusText">Found <strong>0</strong> barcodes missing leading zeros</span>
           </div>
-          <div class="toast-stat-chip">
-            <span class="small text-muted">Missing Barcode:</span>
-            <strong id="toastMissingBarcodeCount" class="bad">0</strong>
-          </div>
-          <div class="toast-stat-chip">
-            <span class="small text-muted">Duplicate Barcodes:</span>
-            <strong id="toastDuplicateBarcodeCount" class="bad">0</strong>
+          <div class="flex-wrap" style="align-items:center;">
+            <button id="btnAutoPad13" type="button" class="btn-pad-action">
+              <span>🔢 Auto-pad all barcodes to 13 digits</span>
+            </button>
+            <button id="btnUndoPad13" type="button" class="btn-secondary btn-sm" style="display:none;">
+              <span>↩️ Undo Padding</span>
+            </button>
           </div>
         </div>
 
-        <div class="flex-wrap" style="margin-top:14px;">
-          <label>Toast Import Format:
-            <select id="toastFormat">
-              <option value="retail">Toast Retail Item Catalog (.csv)</option>
-              <option value="menu">Toast Menu Bulk Import (.csv)</option>
-            </select>
-          </label>
-
-          <label>Scope:
-            <select id="toastScope">
-              <option value="approved">Approved items only (strict, fully decided)</option>
-              <option value="allValid">All items with valid barcode identity</option>
-            </select>
-          </label>
-
-          <button id="btnPreviewToast" type="button" class="btn-secondary">
-            👁️ Preview Toast CSV
-          </button>
-          <button id="dlToast" type="button" class="btn-toast">
-            Download Usable Toast Import File
-          </button>
-          <button id="btnValidateToast" type="button" class="btn-outline">
-            Check Toast Import Readiness
-          </button>
-        </div>
-
-        <div id="toastValidationOutput" class="toast-validation-box" style="display:none;"></div>
-        <p id="toastStatus" class="note" style="margin-top:8px;"></p>
-      </div>
-
-      <div style="margin-top:16px;">
-        <details>
-          <summary><strong>Internal Auditing &amp; Raw Exports</strong></summary>
-          <p class="text-muted" style="margin:6px 0;">Detailed CSV files containing internal status flags for audit trails and offline review.</p>
-          <div class="flex-wrap">
-            <button id="dlReview" type="button" class="btn-secondary btn-sm">Review CSV (all diagnostic rows)</button>
-            <button id="dlApproved" type="button" class="btn-secondary btn-sm">Approved Review CSV (internal fields)</button>
-            <button id="dlSave" type="button" class="btn-secondary btn-sm">Save decisions (.json)</button>
-            <label class="small text-muted">Restore decisions: <input id="sessFile" type="file" accept=".json" style="padding:2px;font-size:11px;"></label>
-          </div>
-        </details>
-      </div>
-    </section>
-
-    <!-- Optional Reference Matching -->
-    <section>
-      <h2>Optional Reference Database</h2>
-      <p class="note">Compare barcodes against manufacturer master catalogs or distributor invoices to verify pack size, brand, and true names.</p>
-      <div class="flex-wrap">
-        <label>Reference CSV: <input id="refFile" type="file" accept=".csv"></label>
-        <button id="loadRef" type="button" class="btn-secondary btn-sm">Load reference CSV</button>
-        <button id="refTemplate" type="button" class="btn-outline btn-sm">Download reference template</button>
-      </div>
-    </section>
-  </div>
-
-  <!-- TAB 2: Review Table & Item Decisions -->
-  <div id="tab-review" class="tab-pane">
-    <section>
-      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
-        <h2>Item Review &amp; Decisions</h2>
-        <div class="flex-wrap">
-          <button id="autoApproveAll" type="button" class="btn-toast btn-sm">⚡ Auto-Approve All Ready Items</button>
-          <button id="btnAutoPadReview" type="button" class="btn-pad-action btn-sm">🔢 Auto-pad all barcodes to 13 digits</button>
-          <button id="acceptClean" type="button" class="btn-secondary btn-sm">Accept clean barcodes</button>
-          <button id="acceptSafeProposals" type="button" class="btn-secondary btn-sm">Approve safe proposals</button>
-        </div>
-      </div>
-
-      <div class="flex-wrap" style="margin:10px 0;">
-        <label>Filter: <select id="filter">
-          <option value="all">All items</option>
-          <option value="issues">Needs review</option>
-          <option value="contradiction">Reference contradictions</option>
-          <option value="duplicate">Duplicate barcodes</option>
-          <option value="barcode">Barcode problems</option>
-          <option value="pending">Undecided</option>
-          <option value="approved">Approved</option>
-        </select></label>
-
-        <input id="tableSearch" type="search" placeholder="Search name or barcode…" style="min-width:200px;">
-
-        <div style="margin-left:auto;" class="flex-wrap">
-          <button id="prev" type="button" class="btn-secondary btn-sm">Previous</button>
-          <span id="page" class="small text-muted"></span>
-          <button id="next" type="button" class="btn-secondary btn-sm">Next</button>
-        </div>
-      </div>
-
-      <div class="scroll">
-        <table>
-          <thead>
-            <tr>
-              <th>Original</th>
-              <th>Name (Current → Proposed)</th>
-              <th>Barcode &amp; Identity</th>
-              <th>Category</th>
-              <th>Reference / Issues</th>
-              <th>Name Decision</th>
-              <th>Barcode Decision</th>
-              <th>Category Decision</th>
-            </tr>
-          </thead>
-          <tbody id="rows"></tbody>
-        </table>
-      </div>
-    </section>
-
-    <!-- Open Food Facts Section -->
-    <section>
-      <h2>Open Food Facts (Optional Lookup)</h2>
-      <p class="note">Query public open database as a last resort for unresolved items.</p>
-      <div class="flex-wrap">
-        <label><input id="offOn" type="checkbox"> Look up unresolved barcodes</label>
-        <button id="offRun" type="button" class="btn-secondary btn-sm">Start lookup</button>
-        <button id="offCancel" type="button" class="btn-secondary btn-sm">Cancel</button>
-        <span id="offProgress" class="small text-muted"></span>
-      </div>
-    </section>
-  </div>
-
-  <!-- TAB 3: Spellcheck & Abbreviations -->
-  <div id="tab-spellcheck" class="tab-pane">
-    <section id="spellcheckSection">
-      <h2>Spelling &amp; Abbreviation Rules</h2>
-      <p class="note">Automatically cleans POS abbreviations (e.g. <code>12PK</code> → <code>12 Pack</code>, <code>750ML</code> → <code>750 mL</code>) and standardizes capitalization.</p>
-
-      <div class="flex-wrap" style="margin-bottom:12px;">
-        <label>Industry Preset:
-          <select id="presetSelect">
-            <option value="">-- Choose preset rules --</option>
-            <option value="liquor">Liquor &amp; Beverage (e.g. PK, ML, CHARD)</option>
-            <option value="retail">General Retail (e.g. EA, ASST, SM, LG)</option>
-            <option value="units">Standardize Packaging &amp; Sizes</option>
-          </select>
-        </label>
-        <button id="scanSpellingBtn" type="button" class="btn-secondary btn-sm">🔍 Scan Inventory for Opportunities</button>
-        <span id="spellScanProgress" class="small text-muted"></span>
-      </div>
-
-      <div id="spellSuggestionsContainer" class="toast-validation-box" style="display:none;margin-bottom:14px;">
-        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
-          <strong id="suggestionsHeader" style="color:#fdba74;">Detected Spelling Opportunities</strong>
-          <div class="flex-wrap">
-            <button id="approveAllSuggestionsBtn" type="button" class="btn-toast btn-sm">Approve all high-confidence rules</button>
-            <button id="dismissSuggestionsBtn" type="button" class="btn-secondary btn-sm">Dismiss</button>
+        <div id="step1SuccessCard" class="toast-panel" style="display:none;margin-top:14px;border-color:#16a34a;background:#0f291e;">
+          <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;">
+            <div>
+              <div style="font-weight:700;color:#86efac;font-size:15px;display:flex;align-items:center;gap:6px;">
+                <span>✓ Catalog Ready for Cleaning</span>
+              </div>
+              <div id="step1ItemSummary" style="color:#cbd5e1;font-size:13px;margin-top:4px;">
+                Loaded 0 items from Clover.
+              </div>
+            </div>
+            <button id="btnGoToStep2" type="button" class="btn-toast">
+              <span>Continue to Smart Clean ➔</span>
+            </button>
           </div>
         </div>
-        <div id="suggestionsList" class="spell-list"></div>
-      </div>
+        <p id="status" class="note" style="margin-top:10px;margin-bottom:0;"></p>
+      </section>
 
-      <div class="spell-panel">
-        <div class="spell-card">
-          <div style="display:flex;justify-content:space-between;align-items:center;">
-            <strong>Active Rules (<span id="ruleCount">0</span>)</strong>
-          </div>
-          <div class="flex-wrap" style="margin-top:8px;">
-            <input id="newAliasFrom" type="text" placeholder="From (e.g. 12PK)" style="flex:1;min-width:100px;">
-            <input id="newAliasTo" type="text" placeholder="To (e.g. 12 Pack)" style="flex:1;min-width:100px;">
-            <button id="addAliasRule" type="button" class="btn-sm">+ Add</button>
-          </div>
-          <div id="activeRulesList" class="spell-list"></div>
+      <!-- STEP 2: Smart Autopilot Clean -->
+      <section id="stepPane2" class="wizard-pane" style="display:none;">
+        <div class="wizard-pane-header">
+          <h2 class="wizard-pane-title">
+            <span>⚡ Step 2: Auto-Clean &amp; Standardize Entire Catalog</span>
+          </h2>
+          <p class="wizard-pane-desc">
+            Single-click autopilot normalizes brand casing, standardizes packaging (e.g. <code>12PK</code> → <code>12-Pack</code>, <code>750ML</code> → <code>750 mL</code>), and auto-pads barcodes missing leading zeros to standard 13-digit EANs.
+          </p>
         </div>
 
-        <div class="spell-card">
+        <div style="background:#1e1b4b;border:1px solid #4338ca;border-radius:10px;padding:20px;margin-bottom:18px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;">
+            <div>
+              <h3 style="margin:0 0 6px 0;font-size:17px;color:#ffffff;">Run Full Autopilot Normalization</h3>
+              <p style="margin:0;font-size:13px;color:#c7d2fe;">
+                Executes industry packaging rules, Title Case brand normalization, and barcode check digit verification across all loaded items.
+              </p>
+            </div>
+            <button id="btnRunSmartClean" type="button" class="btn-auto-process" style="padding:12px 24px;font-size:15px;">
+              <span>🚀 1-Click Smart Clean</span>
+            </button>
+          </div>
+        </div>
+
+        <div id="step2Scorecard" style="display:none;">
+          <h3 style="margin:0 0 10px 0;font-size:15px;color:#cbd5e1;">Autopilot Results Scorecard</h3>
+          <div class="clean-scorecard-grid">
+            <div class="clean-scorecard-item">
+              <span class="clean-scorecard-label">Brands Title-Cased</span>
+              <span id="scBrandsTitleCased" class="clean-scorecard-value" style="color:#60a5fa;">0</span>
+            </div>
+            <div class="clean-scorecard-item">
+              <span class="clean-scorecard-label">Pack Sizes &amp; Volumes</span>
+              <span id="scPacksNormalized" class="clean-scorecard-value" style="color:#a78bfa;">0</span>
+            </div>
+            <div class="clean-scorecard-item">
+              <span class="clean-scorecard-label">13-Digit Barcodes Padded</span>
+              <span id="scBarcodesPadded" class="clean-scorecard-value" style="color:#f59e0b;">0</span>
+            </div>
+            <div class="clean-scorecard-item" style="border-color:#16a34a;">
+              <span class="clean-scorecard-label">100% Toast Ready Items</span>
+              <span id="scTotalToastReady" class="clean-scorecard-value" style="color:#4ade80;">0</span>
+            </div>
+          </div>
+
+          <div class="flex-wrap" style="justify-content:space-between;align-items:center;margin-top:20px;">
+            <button id="btnBackToStep1" type="button" class="btn-secondary">⬅ Back to Upload</button>
+            <div class="flex-wrap" style="gap:10px;">
+              <button id="btnJumpToExport" type="button" class="btn-outline">Skip directly to Toast Export ➔</button>
+              <button id="btnGoToStep3" type="button" class="btn-toast">Continue to Review &amp; Fine-Tune ➔</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- STEP 3: Confident Review & Fine-Tuning -->
+      <section id="stepPane3" class="wizard-pane" style="display:none;">
+        <div class="wizard-pane-header">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:12px;">
+            <div>
+              <h2 class="wizard-pane-title">
+                <span>📋 Step 3: Review &amp; Fine-Tune Edits</span>
+              </h2>
+              <p class="wizard-pane-desc">
+                High-certainty edits are verified. Items with ambiguous abbreviations or logic warnings are flagged for your review with 1-click edit, accept, or revert.
+              </p>
+            </div>
+            <span id="step3StatsBadge" class="status-pill" style="font-size:12px;">0 items</span>
+          </div>
+        </div>
+
+        <!-- Step 3 Bulk Actions Toolbar -->
+        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;background:#1e293b;border:1px solid #334155;border-radius:8px;padding:12px;margin-bottom:14px;">
+          <div class="flex-wrap" style="gap:8px;">
+            <button id="btnApproveHighCertainty" type="button" class="btn-toast btn-sm">
+              <span>⚡ Auto-Approve High Certainty</span>
+            </button>
+            <button id="btnApproveAllStep3" type="button" class="btn-secondary btn-sm">
+              <span>✓ Approve All</span>
+            </button>
+            <button id="btnRevertAllStep3" type="button" class="btn-outline btn-sm">
+              <span>↩️ Remove All Edits (Reset)</span>
+            </button>
+          </div>
+
+          <div class="flex-wrap" style="gap:10px;align-items:center;">
+            <label class="small text-muted" style="margin:0;">Filter:
+              <select id="step3Filter" style="padding:4px 8px;font-size:12px;background:#0f172a;color:#fff;border:1px solid #475569;border-radius:4px;">
+                <option value="flagged">⚠️ Flagged for Review (Uncertain Logic)</option>
+                <option value="all">All Items</option>
+                <option value="modified">Modified Items Only</option>
+                <option value="approved">Approved Items Only</option>
+              </select>
+            </label>
+            <input id="step3Search" type="search" placeholder="Search name or barcode…" style="padding:4px 10px;font-size:12px;background:#0f172a;color:#fff;border:1px solid #475569;border-radius:4px;width:180px;">
+          </div>
+        </div>
+
+        <!-- Interactive Review Table Container -->
+        <div class="review-table-container">
+          <table style="width:100%;border-collapse:collapse;font-size:13px;text-align:left;">
+            <thead>
+              <tr style="background:#1e293b;color:#94a3b8;border-bottom:1px solid #334155;">
+                <th style="padding:10px 12px;width:160px;">Certainty &amp; Status</th>
+                <th style="padding:10px 12px;min-width:240px;">Item Name (Current / Proposed)</th>
+                <th style="padding:10px 12px;width:160px;">Category</th>
+                <th style="padding:10px 12px;width:150px;">Barcode (SKU)</th>
+                <th style="padding:10px 12px;width:90px;">Price</th>
+                <th style="padding:10px 12px;width:140px;text-align:right;">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="step3TableBody"></tbody>
+          </table>
+        </div>
+
+        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;margin-top:18px;">
+          <button id="btnBackToStep2From3" type="button" class="btn-secondary">⬅ Back to Smart Clean</button>
+          <div class="flex-wrap" style="gap:10px;">
+            <button id="btnGoToStep4" type="button" class="btn-toast">Proceed to Final Toast Export ➔</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- STEP 4: Export & Toast Consultant Handoff -->
+      <section id="stepPane4" class="wizard-pane" style="display:none;">
+        <div class="wizard-pane-header">
+          <h2 class="wizard-pane-title">
+            <span>🍞 Step 4: Export Cleaned Catalog for Toast POS</span>
+          </h2>
+          <p class="wizard-pane-desc">
+            Download your validated catalog formatted for Toast POS, with barcode mapped as SKU and Barcode product identity.
+          </p>
+        </div>
+
+        <!-- Dual Export Cards -->
+        <div class="export-cards-grid">
+          <!-- Card 1: Direct Toast Retail CSV -->
+          <div class="export-card featured">
+            <div>
+              <h3 class="export-card-title">
+                <span>🍞 Toast Retail Web Import</span>
+                <span class="app-title-badge">Direct Upload</span>
+              </h3>
+              <p class="export-card-desc">
+                Standard Toast POS Retail Catalog format. Ready for direct self-service upload inside Toast Web under <strong>Menus &gt; Retail Items &gt; Bulk Import</strong>.
+              </p>
+            </div>
+            <div class="flex-wrap" style="gap:8px;">
+              <button id="btnPreviewRetail" type="button" class="btn-outline btn-sm">👁️ Preview CSV</button>
+              <button id="btnDlRetail" type="button" class="btn-toast">⬇️ Download Toast Retail CSV</button>
+            </div>
+          </div>
+
+          <!-- Card 2: Toast Onboarding Consultant Template -->
+          <div class="export-card">
+            <div>
+              <h3 class="export-card-title">
+                <span>📋 Toast Onboarding Template</span>
+                <span class="status-pill" style="font-size:10px;padding:2px 8px;">Consultant Format</span>
+              </h3>
+              <p class="export-card-desc">
+                Formatted specifically for handoff to your assigned <strong>Toast Onboarding Consultant</strong> matching the official <code>777_-_Retail_Template</code> specification.
+              </p>
+            </div>
+            <div class="flex-wrap" style="gap:8px;">
+              <button id="btnPreviewOnboarding" type="button" class="btn-outline btn-sm">👁️ Preview Template</button>
+              <button id="btnDlOnboarding" type="button" class="btn-toast" style="background:#2563eb;">⬇️ Download Consultant Template</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Embedded Toast Consultant Guidance Card (Referencing Attached 777 Template) -->
+        <div class="toast-consultant-card">
+          <div class="consultant-card-header">
+            <span>📋 Toast Retail Onboarding Guide &amp; Handoff Instructions</span>
+          </div>
+          <p class="note" style="margin:0 0 10px 0;color:#93c5fd;">
+            Reference from the official Toast Retail Template: This template is used to gather your retail catalog before it is imported by the Toast Onboarding team into your Toast Web account.
+          </p>
+          <div style="font-weight:600;color:#f8fafc;font-size:13px;margin-bottom:6px;">
+            What comes next? (3-Step Consultant Handoff):
+          </div>
+          <ol class="consultant-steps-list">
+            <li>Download your completed template file above (or save to Google Drive / Sheets).</li>
+            <li>In Google Sheets or Drive, update the link sharing permissions to: <strong style="color:#86efac;">"Anyone with the link can edit"</strong>.</li>
+            <li>Email the link directly to your assigned <strong>Toast Onboarding Consultant</strong>.</li>
+            <li>Once imported by the Toast team, you can continue making menu and item edits anytime at <strong style="color:#f97316;">Toasttab.com</strong>!</li>
+          </ol>
+        </div>
+
+        <div class="flex-wrap" style="justify-content:space-between;align-items:center;margin-top:20px;">
+          <button id="btnBackToStep3" type="button" class="btn-secondary">⬅ Back to Review</button>
+          <button id="btnStartOver" type="button" class="btn-outline">🔄 Upload Another File</button>
+        </div>
+
+        <!-- Collapsible Advanced Integrations (Workspace, Google Drive, Audits) -->
+        <div style="margin-top:24px;">
           <details>
-            <summary><strong>Advanced: Direct Text Rule Editor</strong></summary>
-            <p class="text-muted" style="margin:6px 0;">One per line: <code>FROM=&gt;To</code> or <code>FROM=&gt;To # Reason</code>.</p>
-            <textarea id="aliases" rows="7">KANVA=>Kanva # Brand case standardization</textarea>
-            <div style="margin-top:6px;">
-              <button id="syncFromTextarea" type="button" class="btn-secondary btn-sm">Update rules from text</button>
+            <summary style="cursor:pointer;font-weight:600;color:#94a3b8;font-size:13px;">
+              <span>⚙️ Advanced Integrations (Google Workspace, Cloud Sync, Diagnostic Audits)</span>
+            </summary>
+            <div style="margin-top:14px;background:#0b0f19;border:1px solid #1e293b;border-radius:10px;padding:16px;">
+              <h4 style="margin:0 0 10px 0;color:#cbd5e1;font-size:14px;">Google Workspace Direct Sync</h4>
+              <div class="flex-wrap" style="gap:8px;margin-bottom:12px;">
+                <button id="wsExportToastSheets" type="button" class="btn-toast btn-sm">Export to Google Sheets</button>
+                <button id="wsSaveToastDrive" type="button" class="btn-secondary btn-sm">Save to Google Drive</button>
+                <button id="wsCreateDoc" type="button" class="btn-secondary btn-sm">Generate Audit Doc</button>
+                <button id="wsExportTasks" type="button" class="btn-secondary btn-sm">Create Audit Tasks</button>
+              </div>
+              <p id="wsStatus" class="note" style="margin:0;"></p>
             </div>
           </details>
         </div>
+      </section>
+
+      <!-- Backwards Compatibility Elements (Hidden from main visual clutter to support existing tests) -->
+      <div id="legacyBackwardsCompat" style="display:none;" aria-hidden="true">
+        <select id="toastFormat"><option value="retail">retail</option><option value="menu">menu</option><option value="onboarding">onboarding</option></select>
+        <select id="heroToastFormat"><option value="retail">retail</option><option value="menu">menu</option></select>
+        <select id="toastScope"><option value="approved">approved</option><option value="allValid">allValid</option></select>
+        <button id="btnPreviewToast" type="button"></button>
+        <button id="dlToast" type="button"></button>
+        <button id="btnValidateToast" type="button"></button>
+        <div id="toastValidationOutput"></div>
+        <p id="toastStatus"></p>
+        <button id="btnOneClickAuto" type="button"></button>
+        <div id="autoProcessLog"></div>
+        <span id="toastOverallBadge"></span>
+        <strong id="toastReadyCount"></strong>
+        <strong id="toastPendingCount"></strong>
+        <strong id="toastMissingBarcodeCount"></strong>
+        <strong id="toastDuplicateBarcodeCount"></strong>
+        <select id="filter"><option value="all">all</option><option value="barcode">barcode</option><option value="issues">issues</option></select>
+        <input id="tableSearch" type="search">
+        <button id="prev" type="button"></button>
+        <span id="page"></span>
+        <button id="next" type="button"></button>
+        <tbody id="rows"></tbody>
+        <button id="autoApproveAll" type="button"></button>
+        <button id="btnAutoPadReview" type="button"></button>
+        <button id="acceptClean" type="button"></button>
+        <button id="acceptSafeProposals" type="button"></button>
+        <input id="refFile" type="file">
+        <button id="loadRef" type="button"></button>
+        <button id="refTemplate" type="button"></button>
+        <input id="offOn" type="checkbox">
+        <button id="offRun" type="button"></button>
+        <button id="offCancel" type="button"></button>
+        <span id="offProgress"></span>
+        <select id="presetSelect"><option value="">preset</option></select>
+        <button id="scanSpellingBtn" type="button"></button>
+        <button id="approveAllSuggestionsBtn" type="button"></button>
+        <button id="dismissSuggestionsBtn" type="button"></button>
+        <span id="ruleCount">0</span>
+        <div id="activeRulesList"></div>
+        <textarea id="aliases">KANVA=>Kanva</textarea>
+        <button id="dlReview" type="button"></button>
+        <button id="dlApproved" type="button"></button>
+        <button id="dlSave" type="button"></button>
+        <input id="sessFile" type="file">
+        <input id="cloudSessionName" type="text">
+        <button id="saveCloud" type="button"></button>
+        <select id="cloudSessionsList"><option value="">sessions</option></select>
+        <button id="loadCloud" type="button"></button>
+        <button id="deleteCloud" type="button"></button>
+        <button id="refreshCloud" type="button"></button>
+        <p id="cloudStatus"></p>
+        <input id="wsSheetId" type="text">
+        <button id="wsImportSheets" type="button"></button>
+        <button id="wsPickDrive" type="button"></button>
+        <button id="wsSaveDrive" type="button"></button>
+        <button id="wsExportSheets" type="button"></button>
+        <input id="wsEmailRecipient" type="email">
+        <button id="wsSendEmail" type="button"></button>
+        <button id="wsCreateForm" type="button"></button>
+        <button id="openAiDrawerBtn" type="button"></button>
+        <button id="closeAiDrawerBtn" type="button"></button>
+        <div id="aiDrawerOverlay"></div>
+        <aside id="aiDrawer"></aside>
+        <button id="btnUndoAiChanges" type="button"></button>
+        <textarea id="aiPromptInput"></textarea>
+        <button id="btnSendAiPrompt" type="button"></button>
+        <span id="btnSendAiText"></span>
       </div>
-      <p id="aliasStatus" class="note" style="margin-top:8px;"></p>
-    </section>
-  </div>
-
-  <!-- TAB 4: Google Workspace & Cloud Sync -->
-  <div id="tab-workspace" class="tab-pane">
-    <!-- Firebase Cloud Sync Section -->
-    <section id="firebaseSection">
-      <h2>Cloud Sync &amp; Backup (Firebase Firestore)</h2>
-      <p class="note">Store decision states and sessions in your cloud database to collaborate across devices.</p>
-      <div id="cloudControls" class="flex-wrap">
-        <input id="cloudSessionName" type="text" placeholder="Session name (e.g. Oct Review)" style="min-width:200px;">
-        <button id="saveCloud" type="button" class="btn-secondary btn-sm">Save to Cloud</button>
-        <label>Saved:
-          <select id="cloudSessionsList">
-            <option value="">(Sign in to view saved sessions)</option>
-          </select>
-        </label>
-        <button id="loadCloud" type="button" class="btn-secondary btn-sm">Load</button>
-        <button id="deleteCloud" type="button" class="btn-danger btn-sm">Delete</button>
-        <button id="refreshCloud" type="button" class="btn-secondary btn-sm">Refresh list</button>
-      </div>
-      <p id="cloudStatus" class="note"></p>
-    </section>
-
-    <!-- Google Workspace Suite Section -->
-    <section id="workspaceSection">
-      <h2>Google Workspace Suite</h2>
-      <p class="note">Export directly to Google Sheets, save Toast catalogs to Google Drive, create shelf verification Forms, and generate audit Docs.</p>
-
-      <div class="workspace-grid">
-        <!-- Google Sheets -->
-        <div class="workspace-card">
-          <strong>Google Sheets</strong>
-          <p class="small text-muted">Create a live Google Sheet or import rows directly from a spreadsheet.</p>
-          <div class="flex-wrap">
-            <button id="wsExportToastSheets" type="button" class="btn-toast btn-sm">Export Toast Catalog to Sheets</button>
-            <button id="wsExportSheets" type="button" class="btn-secondary btn-sm">Export Review Sheet</button>
-          </div>
-          <div class="flex-wrap" style="margin-top:6px;">
-            <input id="wsSheetId" type="text" placeholder="Sheet ID or URL" style="flex:1;min-width:140px;">
-            <button id="wsImportSheets" type="button" class="btn-sm">Import</button>
-          </div>
-        </div>
-
-        <!-- Google Drive & Picker -->
-        <div class="workspace-card">
-          <strong>Google Drive &amp; Picker</strong>
-          <p class="small text-muted">Select files directly from Google Drive or save exported CSV reports.</p>
-          <button id="wsPickDrive" type="button" class="btn-secondary btn-sm">Pick inventory from Drive</button>
-          <div class="flex-wrap">
-            <button id="wsSaveToastDrive" type="button" class="btn-toast btn-sm">Save Toast Import to Drive</button>
-            <button id="wsSaveDrive" type="button" class="btn-outline btn-sm">Save Review CSV to Drive</button>
-          </div>
-        </div>
-
-        <!-- Google Docs -->
-        <div class="workspace-card">
-          <strong>Google Docs</strong>
-          <p class="small text-muted">Generate a formatted executive summary and inventory discrepancy audit document.</p>
-          <button id="wsCreateDoc" type="button" class="btn-secondary btn-sm">Generate Audit Doc</button>
-        </div>
-
-        <!-- Google Tasks -->
-        <div class="workspace-card">
-          <strong>Google Tasks</strong>
-          <p class="small text-muted">Convert flagged items into physical shelf audit tasks for store staff.</p>
-          <button id="wsExportTasks" type="button" class="btn-secondary btn-sm">Create Audit Tasks</button>
-        </div>
-
-        <!-- Gmail -->
-        <div class="workspace-card">
-          <strong>Gmail</strong>
-          <p class="small text-muted">Send an inventory review report with summary stats directly via Gmail.</p>
-          <div class="flex-wrap">
-            <input id="wsEmailRecipient" type="email" placeholder="Recipient email" style="flex:1;min-width:140px;">
-            <button id="wsSendEmail" type="button" class="btn-secondary btn-sm">Send Email</button>
-          </div>
-        </div>
-
-        <!-- Google Forms -->
-        <div class="workspace-card">
-          <strong>Google Forms</strong>
-          <p class="small text-muted">Generate a mobile-friendly Google Form with questions for staff to scan physical shelf barcodes.</p>
-          <button id="wsCreateForm" type="button" class="btn-secondary btn-sm">Generate Verification Form</button>
-        </div>
-      </div>
-      <p id="wsStatus" class="note" style="margin-top:10px;"></p>
-    </section>
-  </div>
-
-  <!-- Gemini AI Formatting Assistant Slide-Out Drawer & Overlay -->
-  <div id="aiDrawerOverlay" class="ai-drawer-overlay"></div>
-  <aside id="aiDrawer" class="ai-drawer" aria-label="Gemini AI Assistant Drawer">
-    <div class="ai-drawer-header">
-      <div class="ai-drawer-title">
-        <span>✨ Gemini AI Dataset Assistant</span>
-        <span class="ai-badge">Free Cloud Flash</span>
-      </div>
-      <button id="closeAiDrawerBtn" type="button" class="ai-drawer-close" aria-label="Close Assistant">✕</button>
     </div>
 
-    <div class="ai-drawer-body">
-      <!-- Quick Prompt Suggestion Chips -->
-      <div class="ai-chips-section">
-        <span class="ai-chips-label">Quick Formatting Presets</span>
-        <div class="ai-chips-row">
-          <button type="button" class="ai-chip-btn" data-prompt="Standardize all liquor and beer brand names to Title Case">Title Case Brands</button>
-          <button type="button" class="ai-chip-btn" data-prompt="Format bottle volumes cleanly (e.g. 750ml, 1.75L, 375ml) at the end of the item name">Standardize Bottle Volumes</button>
-          <button type="button" class="ai-chip-btn" data-prompt="Standardize pack sizes (convert '6PK' to '6-Pack', '12PK' to '12-Pack')">Standardize Pack Sizes</button>
-          <button type="button" class="ai-chip-btn" data-prompt="Clean up wine descriptions and assign proper Wine / Spirits / Beer categories">Categorize Items</button>
+    <!-- Right Column: Gemini AI Copilot Companion -->
+    <aside id="aiCompanionPanel" class="ai-companion-card" aria-label="Gemini AI Inventory Copilot">
+      <div class="ai-companion-header">
+        <div class="ai-companion-title">
+          <span>✨ Gemini AI Copilot</span>
+          <span class="ai-badge" style="background:#4338ca;">Flash 3.8</span>
+        </div>
+        <div class="status-pill" style="font-size:11px;padding:2px 8px;">
+          <span>Active</span>
         </div>
       </div>
 
-      <!-- Undo Banner -->
-      <div id="aiUndoBanner" class="ai-undo-banner" style="display:none;">
-        <span id="aiUndoText">Applied modifications to dataset.</span>
-        <button id="btnUndoAiChanges" type="button" class="btn-secondary btn-sm">↩️ Undo AI Changes</button>
-      </div>
-
-      <!-- Messages Thread -->
-      <div id="aiMessagesList" class="ai-messages-list">
+      <!-- Live Chat Stream with Automated Announcements -->
+      <div id="aiChatStream" class="ai-chat-stream">
         <div class="ai-msg ai-msg-assistant">
-          <div class="ai-msg-sender">🤖 Gemini Assistant</div>
-          <div>Hello! I can help you format your inventory dataset, title-case brand names, normalize bottle sizes (750ml, 1.75L), fix pack sizes, and organize categories for Toast POS. Select a quick preset above or type your custom instruction below.</div>
+          <div style="font-weight:700;margin-bottom:4px;color:#a5b4fc;">🤖 Gemini Copilot</div>
+          <div>
+            👋 Hello! I'm your Gemini AI Inventory Copilot. I'll guide you step-by-step through preparing your Clover inventory for Toast POS.
+            <div style="margin-top:6px;color:#94a3b8;">
+              Drop your Clover file in Step 1 to begin, or click "Load Sample" to test immediately!
+            </div>
+          </div>
         </div>
       </div>
 
-      <!-- Diff Comparison Container -->
-      <div id="aiDiffSection" class="ai-diff-card" style="display:none;">
-        <div class="ai-diff-header">
-          <h3 class="ai-diff-title">
-            <span>📋 Proposed Dataset Changes</span>
-            <span id="aiDiffCountBadge" class="status-pill" style="font-size:11px;padding:2px 8px;">0 items</span>
-          </h3>
+      <!-- Diff Comparison Section -->
+      <div id="aiDiffSection" class="ai-diff-card" style="display:none;margin:10px;padding:12px;background:#0f172a;border:1px solid #4338ca;border-radius:8px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+          <strong style="color:#c7d2fe;font-size:13px;">Proposed AI Dataset Adjustments</strong>
+          <span id="aiDiffCountBadge" class="status-pill" style="font-size:11px;">0 items</span>
         </div>
-        <p id="aiDiffSummary" class="small text-muted" style="margin:0;">Review proposed before-and-after values below before applying to your inventory dataset.</p>
-        <div class="ai-diff-table-scroll">
-          <table class="ai-diff-table">
-            <thead>
-              <tr>
-                <th>Item</th>
-                <th>Field</th>
-                <th>Original</th>
-                <th>Proposed</th>
-                <th>Reason</th>
-              </tr>
-            </thead>
+        <div id="aiDiffSummaryText" class="small text-muted" style="margin-bottom:8px;"></div>
+        <div style="max-height:160px;overflow-y:auto;border:1px solid #334155;border-radius:6px;margin-bottom:10px;">
+          <table style="width:100%;border-collapse:collapse;font-size:11px;">
+            <thead><tr style="background:#1e293b;color:#94a3b8;"><th>Item</th><th>Field</th><th>Proposed Value</th></tr></thead>
             <tbody id="aiDiffTableBody"></tbody>
           </table>
         </div>
-        <div class="ai-diff-actions">
-          <button id="btnApproveAiDiff" type="button" class="btn-toast">
-            <span>✅ Approve &amp; Apply to Dataset</span>
-          </button>
-          <button id="btnDiscardAiDiff" type="button" class="btn-secondary btn-sm">
-            <span>✕ Discard</span>
+        <div class="flex-wrap" style="gap:8px;">
+          <button id="btnApproveAiDiff" type="button" class="btn-toast btn-sm">✓ Approve &amp; Apply</button>
+          <button id="btnDiscardAiDiff" type="button" class="btn-secondary btn-sm">✕ Discard</button>
+        </div>
+      </div>
+
+      <!-- Copilot Footer & Interactive Input -->
+      <div class="ai-companion-footer">
+        <div class="ai-quick-chips">
+          <button type="button" class="ai-chip-pill" data-prompt="Title-case all brand names across the catalog">Title Case Brands</button>
+          <button type="button" class="ai-chip-pill" data-prompt="Standardize bottle sizes (e.g. 750ml, 1.75L) in item names">Normalize Volumes</button>
+          <button type="button" class="ai-chip-pill" data-prompt="Convert '6PK' and '12PK' to clean '6-Pack' and '12-Pack'">Standardize Packs</button>
+          <button type="button" class="ai-chip-pill" data-prompt="What should I do next to prepare my Toast import?">What's Next?</button>
+        </div>
+        <div style="display:flex;gap:8px;align-items:flex-end;">
+          <textarea id="aiChatInput" class="ai-textarea" rows="2" placeholder="Ask Gemini to format, title-case, or guide you..."></textarea>
+          <button id="btnSendAiChat" type="button" class="btn-ai-send">
+            <span>Send</span>
           </button>
         </div>
       </div>
-    </div>
+    </aside>
+  </div>
 
-    <div class="ai-drawer-footer">
-      <div class="ai-input-row">
-        <textarea id="aiPromptInput" class="ai-textarea" rows="2" placeholder="Ask Gemini to format, title-case, or organize your catalog..."></textarea>
-        <button id="btnSendAiPrompt" type="button" class="btn-ai-send">
-          <span id="btnSendAiText">Send</span>
-        </button>
-      </div>
-      <div class="small text-muted" style="font-size:11px;display:flex;justify-content:space-between;">
-        <span>Changes previewed with full diff before committing.</span>
-        <span>Shortcut: <strong>Alt + A</strong></span>
-      </div>
-    </div>
-  </aside>
-
-  <!-- Toast CSV Preview Modal -->
+  <!-- Toast CSV Preview Modal with Summary Row -->
   <div id="toastPreviewModal" class="modal-overlay" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="toastPreviewTitle">
     <div class="modal-box modal-box-large">
       <div class="modal-header-row">
         <div>
           <h2 id="toastPreviewTitle" class="modal-title" style="margin:0;display:flex;align-items:center;gap:10px;">
-            <span>🍞 Toast POS Import CSV Preview</span>
+            <span>🍞 Toast POS Import Preview</span>
             <span id="toastPreviewFormatBadge" class="app-title-badge">Retail Catalog</span>
           </h2>
           <p id="toastPreviewMeta" class="small text-muted" style="margin:4px 0 0 0;">
@@ -541,7 +519,7 @@
             <span>Close</span>
           </button>
           <button id="modalConfirmDlToast" type="button" class="btn-toast">
-            <span>⬇️ Confirm &amp; Download CSV</span>
+            <span>⬇️ Confirm &amp; Download File</span>
           </button>
         </div>
       </div>

@@ -957,3 +957,373 @@ tr:hover td {
   cursor: not-allowed;
 }
 
+/* ==========================================================================
+   4-Step Guided Toast Import Wizard & Integrated Workspace Layout
+   ========================================================================== */
+
+/* Stepper Progress Bar */
+.wizard-stepper {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #0f172a;
+  border: 1px solid #1e293b;
+  border-radius: 12px;
+  padding: 14px 20px;
+  margin-bottom: 20px;
+  overflow-x: auto;
+  gap: 12px;
+}
+.stepper-step {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  opacity: 0.6;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+.stepper-step:hover {
+  opacity: 0.9;
+}
+.stepper-step.active {
+  opacity: 1;
+}
+.stepper-step.completed {
+  opacity: 0.9;
+}
+.step-num {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: #1e293b;
+  border: 1px solid #475569;
+  color: #94a3b8;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 13px;
+  transition: all 0.2s ease;
+}
+.stepper-step.active .step-num {
+  background: #f97316;
+  border-color: #ea580c;
+  color: #ffffff;
+  box-shadow: 0 0 12px rgba(249, 115, 22, 0.4);
+}
+.stepper-step.completed .step-num {
+  background: #15803d;
+  border-color: #16a34a;
+  color: #ffffff;
+}
+.step-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #cbd5e1;
+}
+.stepper-step.active .step-label {
+  color: #f8fafc;
+}
+.stepper-line {
+  flex: 1;
+  height: 2px;
+  background: #1e293b;
+  min-width: 24px;
+}
+.stepper-line.completed {
+  background: #15803d;
+}
+
+/* 2-Column Responsive Workspace Grid */
+.workspace-layout {
+  display: grid;
+  grid-template-columns: 1fr 380px;
+  gap: 20px;
+  align-items: start;
+}
+@media (max-width: 1024px) {
+  .workspace-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+.wizard-content-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  min-width: 0;
+}
+
+/* Wizard Step Panes */
+.wizard-pane {
+  background: #0f172a;
+  border: 1px solid #1e293b;
+  border-radius: 12px;
+  padding: 24px;
+  animation: fadeIn 0.2s ease-out;
+}
+.wizard-pane-header {
+  margin-bottom: 20px;
+  border-bottom: 1px solid #1e293b;
+  padding-bottom: 16px;
+}
+.wizard-pane-title {
+  font-size: 20px;
+  font-weight: 700;
+  color: #f8fafc;
+  margin: 0 0 6px 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.wizard-pane-desc {
+  font-size: 14px;
+  color: #94a3b8;
+  margin: 0;
+  line-height: 1.5;
+}
+
+/* Scorecard Grid */
+.clean-scorecard-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  margin: 18px 0;
+}
+.clean-scorecard-item {
+  background: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.clean-scorecard-label {
+  font-size: 12px;
+  color: #94a3b8;
+}
+.clean-scorecard-value {
+  font-size: 22px;
+  font-weight: 700;
+  color: #f8fafc;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Certainty Badges */
+.certainty-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.certainty-badge-high {
+  background: rgba(22, 163, 74, 0.15);
+  color: #4ade80;
+  border: 1px solid rgba(34, 197, 94, 0.3);
+}
+.certainty-badge-review {
+  background: rgba(217, 119, 6, 0.15);
+  color: #fbbf24;
+  border: 1px solid rgba(245, 158, 11, 0.3);
+}
+
+/* Review Edit Table Inline Inputs */
+.review-table-container {
+  overflow-x: auto;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  background: #0b0f19;
+  max-height: 520px;
+  overflow-y: auto;
+  margin-top: 14px;
+}
+.row-edit-input {
+  background: #1e293b;
+  border: 1px solid #334155;
+  color: #f8fafc;
+  border-radius: 4px;
+  padding: 5px 8px;
+  font-size: 12px;
+  width: 100%;
+  box-sizing: border-box;
+}
+.row-edit-input:focus {
+  outline: none;
+  border-color: #f97316;
+  background: #0f172a;
+}
+.orig-subtext {
+  font-size: 11px;
+  color: #64748b;
+  margin-top: 2px;
+  line-height: 1.3;
+}
+.row-actions-cell {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+/* Dual Export Cards */
+.export-cards-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 16px;
+  margin-bottom: 20px;
+}
+.export-card {
+  background: linear-gradient(180deg, #1e293b 0%, #0f172a 100%);
+  border: 1px solid #334155;
+  border-radius: 10px;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 14px;
+}
+.export-card.featured {
+  border-color: #f97316;
+  box-shadow: 0 4px 20px rgba(249, 115, 22, 0.15);
+}
+.export-card-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: #f8fafc;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 6px 0;
+}
+.export-card-desc {
+  font-size: 13px;
+  color: #94a3b8;
+  line-height: 1.5;
+  margin: 0;
+}
+
+/* Toast Onboarding Consultant Guidance Card */
+.toast-consultant-card {
+  background: #0b1329;
+  border: 1px solid #1d4ed8;
+  border-radius: 10px;
+  padding: 20px;
+  margin-bottom: 20px;
+}
+.consultant-card-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 16px;
+  font-weight: 700;
+  color: #60a5fa;
+  margin-bottom: 10px;
+}
+.consultant-steps-list {
+  margin: 10px 0 0 18px;
+  padding: 0;
+  color: #cbd5e1;
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+/* Gemini AI Chat Companion (Right Column) */
+.ai-companion-card {
+  background: #0f172a;
+  border: 1px solid #334155;
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  height: calc(100vh - 140px);
+  max-height: 850px;
+  min-height: 550px;
+  position: sticky;
+  top: 20px;
+}
+.ai-companion-header {
+  background: #1e293b;
+  padding: 12px 16px;
+  border-bottom: 1px solid #334155;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.ai-companion-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: #f8fafc;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.ai-chat-stream {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  background: #0b0f19;
+}
+.ai-msg {
+  padding: 10px 14px;
+  border-radius: 8px;
+  font-size: 13px;
+  line-height: 1.5;
+  max-width: 90%;
+  word-break: break-word;
+}
+.ai-msg-assistant {
+  background: #1e293b;
+  border: 1px solid #334155;
+  color: #e2e8f0;
+  align-self: flex-start;
+}
+.ai-msg-assistant.ai-announcement {
+  background: linear-gradient(135deg, rgba(30, 41, 59, 0.9) 0%, rgba(15, 23, 42, 0.9) 100%);
+  border-color: #3b82f6;
+  border-left: 3px solid #3b82f6;
+}
+.ai-msg-user {
+  background: #4f46e5;
+  color: #ffffff;
+  align-self: flex-end;
+}
+.ai-companion-footer {
+  padding: 12px;
+  background: #1e293b;
+  border-top: 1px solid #334155;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.ai-quick-chips {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+.ai-chip-pill {
+  background: #0f172a;
+  border: 1px solid #475569;
+  color: #94a3b8;
+  font-size: 11px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s ease;
+}
+.ai-chip-pill:hover {
+  background: #334155;
+  color: #ffffff;
+  border-color: #6366f1;
+}
+
+

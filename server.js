@@ -20,11 +20,18 @@ app.use(express.json({ limit: '15mb' }));
 app.use(express.static(__dirname));
 
 // Initialize GoogleGenAI SDK instance
-const ai = new GoogleGenAI();
+const ai = new GoogleGenAI({
+  apiKey: process.env.GEMINI_API_KEY,
+  httpOptions: {
+    headers: {
+      'User-Agent': 'aistudio-build'
+    }
+  }
+});
 
 /**
  * POST /api/ai/format
- * Formats inventory dataset items using Gemini 2.5 Flash with structured output schema.
+ * Formats inventory dataset items using Gemini 3.8 Flash with structured output schema.
  */
 app.post('/api/ai/format', async (req, res) => {
   try {
@@ -69,7 +76,7 @@ Items to evaluate (${sampleItems.length} items):
 ${JSON.stringify(sampleItems, null, 2)}`;
 
     const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
+      model: 'gemini-3.8-flash',
       contents: userContent,
       config: {
         systemInstruction,
@@ -120,22 +127,26 @@ ${JSON.stringify(sampleItems, null, 2)}`;
 
 /**
  * POST /api/ai/chat
- * Conversational assistant for retail & Toast POS questions.
+ * Conversational assistant for retail & Toast POS questions and workflow guidance.
  */
 app.post('/api/ai/chat', async (req, res) => {
   try {
-    const { message } = req.body;
+    const { message, context } = req.body;
     if (!message || typeof message !== 'string' || !message.trim()) {
       return res.status(400).json({ ok: false, error: 'A message string is required.' });
     }
 
-    const systemInstruction = `You are an expert retail & liquor store inventory specialist and POS advisor for Clover-to-Toast transitions.
-Help the store operator understand Toast CSV import formatting, barcode standards (EAN-13, UPC-A, GTIN-14), pricing rules, and catalog cleanliness.
-Keep answers friendly, clear, and actionable. Use bullet points where appropriate.`;
+    const systemInstruction = `You are the Gemini AI Inventory Copilot for store operators migrating inventory from Clover to Toast POS.
+You help operators understand Toast CSV import requirements, barcode integrity (UPC-A, EAN-13 padding, SKU identity), category structuring, and packaging rules.
+Provide clear, reassuring, and concise advice. If the user asks you to modify items or categories, explain how to do it or advise them to use the interactive formatting prompt.`;
+
+    const contents = context
+      ? `Workflow Context: ${JSON.stringify(context)}\nUser Question: ${message.trim()}`
+      : message.trim();
 
     const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: message.trim(),
+      model: 'gemini-3.8-flash',
+      contents,
       config: {
         systemInstruction
       }
@@ -149,7 +160,7 @@ Keep answers friendly, clear, and actionable. Use bullet points where appropriat
     console.warn('AI chat error (fallback provided):', err.message);
     return res.json({
       ok: true,
-      reply: `I can help format your catalog for Toast POS. You can ask me to standardize bottle sizes (e.g. 750ml, 1.75L), title-case brand names, normalize multi-packs (e.g. 6-Pack), or auto-pad barcodes to 13 digits.`
+      reply: `I'm here to assist with your Toast POS import. You can ask me how to standardize bottle sizes, pad barcodes, or prepare the official Toast Onboarding Retail Template.`
     });
   }
 });

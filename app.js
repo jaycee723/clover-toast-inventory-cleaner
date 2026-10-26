@@ -1,7 +1,25 @@
 import { toCsv } from './src/csv.js';
 import { parseInventoryFile } from './src/xlsx.js';
 import { parseReferenceCsv, buildReferenceIndex, referenceTemplateCsv } from './src/reference.js';
-import { buildRows, setDecision, issues, approvedRows, acceptCleanBarcodes, summarize, exportHeader, exportRows, applyOffSuggestions, saveSession, loadSession, isApproved } from './src/review.js';
+import {
+  buildRows,
+  setDecision,
+  issues,
+  approvedRows,
+  acceptCleanBarcodes,
+  summarize,
+  exportHeader,
+  exportRows,
+  applyOffSuggestions,
+  saveSession,
+  loadSession,
+  isApproved,
+  computeRowCertainty,
+  updateRowValue,
+  revertRowEdit,
+  revertAllEdits,
+  autoApproveHighCertainty
+} from './src/review.js';
 import { runOffQueue } from './src/off.js';
 import {
   exportToastRows,
@@ -9,8 +27,10 @@ import {
   validateToastRow,
   getBarcodeIdentity,
   computeToastPreviewSummary,
+  formatToastPrice,
   TOAST_RETAIL_HEADERS,
-  TOAST_MENU_HEADERS
+  TOAST_MENU_HEADERS,
+  TOAST_ONBOARDING_HEADERS
 } from './src/toast.js';
 import {
   signInWithGoogle,
@@ -417,6 +437,15 @@ bindClick('load', async () => {
     if (currentSuggestions.length > 0 && $('aliasStatus')) {
       $('aliasStatus').textContent = `Loaded ${S.records.length} items. Found ${currentSuggestions.length} spelling/abbreviation opportunity(ies) in Step 2.`;
     }
+
+    const succCard = $('step1SuccessCard');
+    if (succCard) setDisplay(succCard, 'block');
+    const summaryEl = $('step1ItemSummary');
+    if (summaryEl) summaryEl.textContent = `Loaded ${S.records.length} items from "${f.name}". Ready for autopilot cleaning.`;
+    const sub = $('fileStatusSub');
+    if (sub) sub.textContent = `${S.records.length} items loaded from ${f.name}`;
+
+    postAiAnnouncement(`Loaded ${S.records.length} items from "${f.name}". Click "Continue to Smart Clean" to proceed to Step 2!`);
   } catch (e) {
     fail('status', e);
   }
@@ -684,7 +713,9 @@ export function openToastPreviewModal({ format, scope } = {}) {
     }
 
     const dateStr = new Date().toISOString().slice(0, 10);
-    const filename = fmt === 'retail'
+    const filename = fmt === 'onboarding'
+      ? `toast_onboarding_template_${dateStr}.csv`
+      : fmt === 'retail'
       ? `toast_retail_import_${dateStr}.csv`
       : `toast_menu_import_${dateStr}.csv`;
 
@@ -698,7 +729,7 @@ export function openToastPreviewModal({ format, scope } = {}) {
 
     setText('toastPreviewFilename', filename);
     setText('toastPreviewCount', `${itemCount} item${itemCount === 1 ? '' : 's'}`);
-    setText('toastPreviewFormatBadge', fmt === 'retail' ? 'Toast Retail Catalog' : 'Toast Menu Bulk Import');
+    setText('toastPreviewFormatBadge', fmt === 'onboarding' ? 'Toast Onboarding Consultant Template' : (fmt === 'retail' ? 'Toast Retail Catalog' : 'Toast Menu Bulk Import'));
 
     const searchInput = $('toastPreviewSearch');
     if (searchInput) searchInput.value = '';
@@ -1965,5 +1996,725 @@ function onUndoAiChanges() {
 bindClick('btnApproveAiDiff', onApproveAiDiff);
 bindClick('btnDiscardAiDiff', onDiscardAiDiff);
 bindClick('btnUndoAiChanges', onUndoAiChanges);
+
+// ============================================================================
+// 777 LIQUOR STORE SAMPLE CATALOG & 4-STEP WIZARD
+// ============================================================================
+
+export const SAMPLE_777_INVENTORY = [
+  {
+    id: 'CLV-101',
+    name: 'TITOS HANDMADE VODKA 750ML',
+    category: 'Spirits - Vodka',
+    price: '24.99',
+    cost: '18.25',
+    barcode: '067454500005', // 12-digit UPC-A (valid check digit 5)
+    sku: '067454500005',
+    unit: 'Bottle',
+    brand: "Tito's",
+    supplier: "Southern Glazer's",
+    supplierItemId: 'SG-777-101'
+  },
+  {
+    id: 'CLV-102',
+    name: 'CORONA EXTRA 6PK BTL',
+    category: 'Beer - Imports',
+    price: '11.99',
+    cost: '8.50',
+    barcode: '080660956152', // 12-digit UPC-A (valid check digit 2)
+    sku: '080660956152',
+    unit: '6-Pack',
+    brand: 'Corona',
+    supplier: 'RNDC',
+    supplierItemId: 'RNDC-777-102'
+  },
+  {
+    id: 'CLV-103',
+    name: 'HENNESSY VS COGNAC 750ML',
+    category: 'Spirits - Cognac',
+    price: '39.99',
+    cost: '31.00',
+    barcode: '081753812836', // 12-digit UPC-A (valid check digit 6)
+    sku: '081753812836',
+    unit: 'Bottle',
+    brand: 'Hennessy',
+    supplier: "Southern Glazer's",
+    supplierItemId: 'SG-777-103'
+  },
+  {
+    id: 'CLV-104',
+    name: 'BUD LIGHT 12PK CANS',
+    category: 'Beer - Domestic',
+    price: '13.99',
+    cost: '10.20',
+    barcode: '018200530470', // 12-digit UPC-A (valid check digit 0)
+    sku: '018200530470',
+    unit: '12-Pack',
+    brand: 'Bud Light',
+    supplier: 'Anheuser-Busch Sales',
+    supplierItemId: 'AB-777-104'
+  },
+  {
+    id: 'CLV-105',
+    name: 'VEUVE CLICQUOT BRUT 750ML',
+    category: 'Wine - Champagne',
+    price: '64.99',
+    cost: '49.50',
+    barcode: '3049610004104', // 13-digit EAN-13 (valid check digit 4)
+    sku: '3049610004104',
+    unit: 'Bottle',
+    brand: 'Veuve Clicquot',
+    supplier: 'Moët Hennessy',
+    supplierItemId: 'MH-777-105'
+  },
+  {
+    id: 'CLV-106',
+    name: 'WOODFORD RESERVE BOURBON 750ML',
+    category: 'Spirits - Whiskey',
+    price: '36.99',
+    cost: '27.50',
+    barcode: '081128001007', // 12-digit UPC-A (valid check digit 7)
+    sku: '081128001007',
+    unit: 'Bottle',
+    brand: 'Woodford Reserve',
+    supplier: 'Brown-Forman',
+    supplierItemId: 'BF-777-106'
+  },
+  {
+    id: 'CLV-107',
+    name: 'MODELO ESPECIAL 12PK CAN',
+    category: 'Beer - Imports',
+    price: '18.99',
+    cost: '14.10',
+    barcode: '080660957570', // 12-digit UPC-A (valid check digit 0)
+    sku: '080660957570',
+    unit: '12-Pack',
+    brand: 'Modelo',
+    supplier: 'Constellation Brands',
+    supplierItemId: 'CB-777-107'
+  },
+  {
+    id: 'CLV-108',
+    name: 'GREY GOOSE VODKA 1L',
+    category: 'Spirits - Vodka',
+    price: '42.99',
+    cost: '33.20',
+    barcode: '080480280024', // 12-digit UPC-A (valid check digit 4)
+    sku: '080480280024',
+    unit: 'Bottle',
+    brand: 'Grey Goose',
+    supplier: 'Bacardi USA',
+    supplierItemId: 'BAC-777-108'
+  },
+  {
+    id: 'CLV-109',
+    name: 'JOHNNIE WALKER BLACK 750ML',
+    category: 'Spirits - Scotch',
+    price: '38.99',
+    cost: '29.50',
+    barcode: '088076161864', // 12-digit UPC-A (valid check digit 4)
+    sku: '088076161864',
+    unit: 'Bottle',
+    brand: 'Johnnie Walker',
+    supplier: 'Diageo',
+    supplierItemId: 'DIA-777-109'
+  },
+  {
+    id: 'CLV-110',
+    name: 'PATRON SILVER TEQUILA 750ML',
+    category: 'Spirits - Tequila',
+    price: '49.99',
+    cost: '38.00',
+    barcode: '721733000021', // 12-digit UPC-A (valid check digit 1)
+    sku: '721733000021',
+    unit: 'Bottle',
+    brand: 'Patrón',
+    supplier: 'Bacardi USA',
+    supplierItemId: 'BAC-777-110'
+  },
+  {
+    id: 'CLV-111',
+    name: '777 MYSTERY BLEND CRAFT 12PK',
+    category: 'Beer - Craft',
+    price: '15.99',
+    cost: '11.00',
+    barcode: '012345678905', // 12-digit UPC-A (valid check digit 5)
+    sku: '012345678905',
+    unit: '12-Pack',
+    brand: '777 House',
+    supplier: 'Local Craft Dist',
+    supplierItemId: '777-CRAFT-111'
+  },
+  {
+    id: 'CLV-112',
+    name: 'HOUSE VINTAGE RED WINE 750ML',
+    category: 'Wine - Red',
+    price: '9.99',
+    cost: '6.00',
+    barcode: '04300001402', // 11 digits missing leading zero -> triggers padding/review flag
+    sku: '04300001402',
+    unit: 'Bottle',
+    brand: 'House',
+    supplier: 'Direct Wine Co',
+    supplierItemId: 'DW-777-112'
+  }
+];
+
+let currentWizardStep = 1;
+
+/**
+ * Transitions the 4-step wizard UI between Steps 1, 2, 3, and 4.
+ */
+export function setWizardStep(stepNum) {
+  currentWizardStep = stepNum;
+
+  for (let i = 1; i <= 4; i++) {
+    const ind = $(`stepIndicator${i}`);
+    if (ind) {
+      ind.classList.remove('active', 'completed');
+      if (i === stepNum) ind.classList.add('active');
+      else if (i < stepNum) ind.classList.add('completed');
+    }
+    const pane = $(`stepPane${i}`);
+    if (pane) setDisplay(pane, i === stepNum ? 'block' : 'none');
+  }
+
+  for (let l = 1; l <= 3; l++) {
+    const line = $(`stepperLine${l}`);
+    if (line) {
+      if (stepNum > l) line.classList.add('completed');
+      else line.classList.remove('completed');
+    }
+  }
+
+  if (stepNum === 3) {
+    renderStep3Table();
+  }
+}
+
+// Stepper click listeners
+for (let s = 1; s <= 4; s++) {
+  const el = $(`stepIndicator${s}`);
+  if (el) {
+    el.addEventListener('click', () => {
+      if (s === 1 || S.records.length > 0) {
+        setWizardStep(s);
+      }
+    });
+  }
+}
+
+// Step Navigation Buttons
+bindClick('btnGoToStep2', () => setWizardStep(2));
+bindClick('btnBackToStep1', () => setWizardStep(1));
+bindClick('btnJumpToExport', () => setWizardStep(4));
+bindClick('btnGoToStep3', () => setWizardStep(3));
+bindClick('btnBackToStep2From3', () => setWizardStep(2));
+bindClick('btnGoToStep4', () => setWizardStep(4));
+bindClick('btnBackToStep3', () => setWizardStep(3));
+bindClick('btnStartOver', () => {
+  setWizardStep(1);
+  const succCard = $('step1SuccessCard');
+  if (succCard) setDisplay(succCard, 'none');
+});
+
+// Load Sample 777 Catalog
+function loadSampleInventory() {
+  S.records = JSON.parse(JSON.stringify(SAMPLE_777_INVENTORY));
+  S.canonical = [];
+  S.page = 1;
+  rebuild(false);
+
+  const succCard = $('step1SuccessCard');
+  if (succCard) setDisplay(succCard, 'block');
+  const summaryEl = $('step1ItemSummary');
+  if (summaryEl) summaryEl.textContent = `Loaded ${S.records.length} items from 777 Liquor Store sample catalog.`;
+  const sub = $('fileStatusSub');
+  if (sub) sub.textContent = `${S.records.length} sample items loaded`;
+
+  postAiAnnouncement(`Loaded ${S.records.length} sample items from 777 Liquor Store catalog. Click "Continue to Smart Clean" to begin Step 2!`);
+}
+
+bindClick('btnLoadSample', loadSampleInventory);
+
+// Step 2 Smart Clean Handler
+function onRunSmartClean() {
+  if (!S.records || !S.records.length) {
+    if ($('status')) $('status').textContent = 'Please load an inventory file in Step 1 first.';
+    return;
+  }
+
+  // 1. Add standard packaging rules and liquor presets
+  const unitsRules = SPELLCHECK_PRESETS.units?.rules || [];
+  const liquorRules = SPELLCHECK_PRESETS.liquor?.rules || [];
+  const combined = [...unitsRules, ...liquorRules];
+
+  for (const r of combined) {
+    if (!S.aliases.some((a) => a.from.toUpperCase() === r.from.toUpperCase())) {
+      S.aliases.push({ ...r, approved: true });
+    }
+  }
+
+  // 2. Rebuild with active rules
+  rebuild(false);
+
+  // 3. Auto-pad barcodes to 13 digits
+  const padRes = autoPadBarcodes13(S.records, S.rows);
+  rebuild(false);
+
+  // 4. Accept clean barcodes
+  acceptCleanBarcodes(S.rows);
+
+  // 5. Auto-approve safe proposals
+  const { approvedNames, approvedCats } = autoApproveSafeProposals(S.rows);
+
+  rebuild(true);
+
+  // 6. Update scorecard
+  const scorecard = $('step2Scorecard');
+  if (scorecard) setDisplay(scorecard, 'block');
+
+  const readyToast = S.rows.filter(isApproved).length;
+  setText('scBrandsTitleCased', String(approvedNames));
+  setText('scPacksNormalized', String(combined.length));
+  setText('scBarcodesPadded', String(padRes.paddedCount));
+  setText('scTotalToastReady', String(readyToast));
+
+  postAiAnnouncement(`🚀 Smart Clean Complete! Standardized packaging rules, auto-padded ${padRes.paddedCount} barcodes to 13 digits, and validated ${readyToast} items ready for Toast POS!`);
+}
+
+bindClick('btnRunSmartClean', onRunSmartClean);
+
+// Step 3 Interactive Review Table Rendering with Certainty Flagging
+export function renderStep3Table() {
+  const tbody = $('step3TableBody');
+  if (!tbody) return;
+  tbody.replaceChildren();
+
+  const filterMode = $('step3Filter')?.value || 'flagged';
+  const searchQ = ($('step3Search')?.value || '').trim().toLowerCase();
+
+  const evaluatedRows = S.rows.map((r) => {
+    const cert = computeRowCertainty(r);
+    return { row: r, cert };
+  });
+
+  const filtered = evaluatedRows.filter(({ row, cert }) => {
+    if (filterMode === 'flagged' && !cert.flagged) return false;
+    if (filterMode === 'approved' && !isApproved(row)) return false;
+    if (filterMode === 'modified' && !row.manuallyEdited && !row.proposed_name && !row.proposed_category) return false;
+
+    if (!searchQ) return true;
+    const n = (row.current_name || '').toLowerCase();
+    const orig = (row.original_name || '').toLowerCase();
+    const bc = (row.barcode?.original || '').toLowerCase();
+    const cat = (row.category || '').toLowerCase();
+    return n.includes(searchQ) || orig.includes(searchQ) || bc.includes(searchQ) || cat.includes(searchQ);
+  });
+
+  const totalFlagged = evaluatedRows.filter(({ cert }) => cert.flagged).length;
+  const badge = $('step3StatsBadge');
+  if (badge) {
+    badge.textContent = `Showing ${filtered.length} of ${S.rows.length} items (${totalFlagged} flagged for review)`;
+  }
+
+  if (filtered.length === 0) {
+    const tr = document.createElement('tr');
+    const td = document.createElement('td');
+    td.colSpan = 6;
+    td.style.padding = '24px';
+    td.style.textAlign = 'center';
+    td.style.color = '#94a3b8';
+    td.innerHTML = filterMode === 'flagged'
+      ? '🎉 <strong>No items need review!</strong> All catalog items passed certainty checks. Click "Proceed to Final Toast Export" below.'
+      : 'No items match your filter criteria.';
+    tr.append(td);
+    tbody.append(tr);
+    return;
+  }
+
+  filtered.forEach(({ row, cert }) => {
+    const tr = document.createElement('tr');
+    tr.style.borderBottom = '1px solid #334155';
+    if (cert.flagged) {
+      tr.style.background = '#2a1a1a';
+    }
+
+    // Col 1: Certainty & Status
+    const tdCert = document.createElement('td');
+    tdCert.style.padding = '10px 12px';
+    tdCert.style.verticalAlign = 'top';
+
+    const certBadge = document.createElement('span');
+    certBadge.className = cert.flagged ? 'certainty-badge-review' : 'certainty-badge-high';
+    certBadge.textContent = cert.flagged ? '⚠️ Review Needed' : '✓ High Certainty';
+    tdCert.append(certBadge);
+
+    if (cert.flagged && cert.reasons?.length) {
+      const reasonBox = document.createElement('div');
+      reasonBox.style.fontSize = '11px';
+      reasonBox.style.color = '#fca5a5';
+      reasonBox.style.marginTop = '4px';
+      reasonBox.textContent = cert.reasons.join('; ');
+      tdCert.append(reasonBox);
+    }
+    if (isApproved(row)) {
+      const appBadge = document.createElement('span');
+      appBadge.className = 'status-pill';
+      appBadge.style.fontSize = '10px';
+      appBadge.style.padding = '2px 6px';
+      appBadge.style.marginTop = '4px';
+      appBadge.style.display = 'inline-block';
+      appBadge.textContent = 'Toast Approved';
+      tdCert.append(appBadge);
+    }
+
+    // Col 2: Item Name (with editable input)
+    const tdName = document.createElement('td');
+    tdName.style.padding = '10px 12px';
+    tdName.style.verticalAlign = 'top';
+
+    if (row.original_name && row.original_name !== row.current_name) {
+      const origDiv = document.createElement('div');
+      origDiv.className = 'small text-muted';
+      origDiv.textContent = `Orig: ${row.original_name}`;
+      tdName.append(origDiv);
+    }
+
+    const nameInput = document.createElement('input');
+    nameInput.type = 'text';
+    nameInput.className = 'row-edit-input';
+    nameInput.dataset.id = row.id;
+    nameInput.dataset.field = 'current_name';
+    nameInput.value = row.current_name || '';
+    nameInput.title = 'Edit item name';
+    tdName.append(nameInput);
+
+    if (row.proposed_name && row.proposed_name !== row.current_name) {
+      const propDiv = document.createElement('div');
+      propDiv.className = 'small ok';
+      propDiv.style.marginTop = '2px';
+      propDiv.textContent = `Auto proposal: ${row.proposed_name}`;
+      tdName.append(propDiv);
+    }
+
+    // Col 3: Category (with editable input)
+    const tdCat = document.createElement('td');
+    tdCat.style.padding = '10px 12px';
+    tdCat.style.verticalAlign = 'top';
+    const catInput = document.createElement('input');
+    catInput.type = 'text';
+    catInput.className = 'row-edit-input';
+    catInput.dataset.id = row.id;
+    catInput.dataset.field = 'category';
+    catInput.value = row.category || '';
+    catInput.title = 'Edit category';
+    tdCat.append(catInput);
+
+    // Col 4: Barcode (with editable input)
+    const tdBarcode = document.createElement('td');
+    tdBarcode.style.padding = '10px 12px';
+    tdBarcode.style.verticalAlign = 'top';
+    const bcInput = document.createElement('input');
+    bcInput.type = 'text';
+    bcInput.className = 'row-edit-input';
+    bcInput.dataset.id = row.id;
+    bcInput.dataset.field = 'barcode';
+    bcInput.value = row.barcode?.original || '';
+    bcInput.title = 'Edit barcode';
+    tdBarcode.append(bcInput);
+
+    if (row.barcode?.type) {
+      const bcType = document.createElement('div');
+      bcType.className = 'small text-muted';
+      bcType.style.marginTop = '2px';
+      bcType.textContent = `Type: ${row.barcode.type}`;
+      tdBarcode.append(bcType);
+    }
+
+    // Col 5: Price
+    const tdPrice = document.createElement('td');
+    tdPrice.style.padding = '10px 12px';
+    tdPrice.style.verticalAlign = 'top';
+    tdPrice.innerHTML = `<span class="toast-preview-price">$${formatToastPrice(row.price) || '0.00'}</span>`;
+
+    // Col 6: Actions (Accept & Revert)
+    const tdActions = document.createElement('td');
+    tdActions.style.padding = '10px 12px';
+    tdActions.style.verticalAlign = 'top';
+    tdActions.style.textAlign = 'right';
+
+    const btnGroup = document.createElement('div');
+    btnGroup.className = 'flex-wrap';
+    btnGroup.style.justifyContent = 'flex-end';
+    btnGroup.style.gap = '6px';
+
+    const acceptBtn = document.createElement('button');
+    acceptBtn.type = 'button';
+    acceptBtn.className = 'btn-toast btn-sm btn-row-accept';
+    acceptBtn.dataset.id = row.id;
+    acceptBtn.textContent = '✓ Accept';
+
+    const revertBtn = document.createElement('button');
+    revertBtn.type = 'button';
+    revertBtn.className = 'btn-outline btn-sm btn-row-revert';
+    revertBtn.dataset.id = row.id;
+    revertBtn.textContent = '↩️ Revert';
+
+    btnGroup.append(acceptBtn, revertBtn);
+    tdActions.append(btnGroup);
+
+    tr.append(tdCert, tdName, tdCat, tdBarcode, tdPrice, tdActions);
+    tbody.append(tr);
+  });
+}
+
+// Step 3 Table Event Delegation (Editing, Accepting, Reverting)
+const step3Tbody = $('step3TableBody');
+if (step3Tbody) {
+  step3Tbody.addEventListener('change', (e) => {
+    const target = e.target;
+    if (target && target.classList.contains('row-edit-input')) {
+      const id = target.dataset.id;
+      const field = target.dataset.field;
+      const val = target.value;
+      updateRowValue(S.rows, id, field, val);
+      renderStep3Table();
+      updateSummary();
+    }
+  });
+
+  step3Tbody.addEventListener('click', (e) => {
+    const target = e.target;
+    if (target && target.classList.contains('btn-row-accept')) {
+      const id = target.dataset.id;
+      const row = S.rows.find((r) => r.id === id);
+      if (row) {
+        row.decisions.name = 'accept';
+        row.decisions.category = 'accept';
+        row.decisions.barcode = 'accept';
+        renderStep3Table();
+        updateSummary();
+        postAiAnnouncement(`Accepted edits for "${row.current_name}". Barcode mapped for Toast import.`);
+      }
+    } else if (target && target.classList.contains('btn-row-revert')) {
+      const id = target.dataset.id;
+      const row = revertRowEdit(S.rows, id);
+      if (row) {
+        renderStep3Table();
+        updateSummary();
+        postAiAnnouncement(`Reverted "${row.current_name}" back to original Clover imported values.`);
+      }
+    }
+  });
+}
+
+// Step 3 Filter and Search Listeners
+bindChange('step3Filter', () => renderStep3Table());
+const step3Search = $('step3Search');
+if (step3Search) {
+  step3Search.addEventListener('input', () => renderStep3Table());
+}
+
+// Step 3 Bulk Actions
+bindClick('btnApproveHighCertainty', () => {
+  const count = autoApproveHighCertainty(S.rows);
+  renderStep3Table();
+  updateSummary();
+  postAiAnnouncement(`⚡ Auto-approved ${count} high-certainty items! Remaining items with ambiguous logic remain flagged for your review.`);
+});
+
+bindClick('btnApproveAllStep3', () => {
+  for (const r of S.rows) {
+    r.decisions.name = 'accept';
+    r.decisions.category = 'accept';
+    r.decisions.barcode = 'accept';
+  }
+  renderStep3Table();
+  updateSummary();
+  postAiAnnouncement(`✓ Approved all ${S.rows.length} catalog items for Toast POS import.`);
+});
+
+bindClick('btnRevertAllStep3', () => {
+  const count = revertAllEdits(S.rows);
+  renderStep3Table();
+  updateSummary();
+  postAiAnnouncement(`↩️ Reset all ${count} catalog items back to their original Clover imported state.`);
+});
+
+// Step 4 Dual Export Handlers
+bindClick('btnPreviewRetail', () => {
+  openToastPreviewModal({ format: 'retail', scope: 'allValid' });
+});
+
+bindClick('btnDlRetail', () => {
+  try {
+    const dateStr = new Date().toISOString().slice(0, 10);
+    const filename = `toast_retail_import_${dateStr}.csv`;
+    const toastTable = exportToastRows(S.rows, { format: 'retail', onlyApproved: false, strictBarcodes: true });
+    if (toastTable.length <= 1) {
+      throw new Error('No items have valid barcodes ready for Toast Retail import.');
+    }
+    const csv = toCsv(toastTable);
+    download(filename, csv);
+    postAiAnnouncement(`⬇️ Downloaded Toast Retail CSV (${toastTable.length - 1} items). Ready for direct upload in Toast Web!`);
+  } catch (err) {
+    fail('toastStatus', err);
+  }
+});
+
+bindClick('btnPreviewOnboarding', () => {
+  openToastPreviewModal({ format: 'onboarding', scope: 'allValid' });
+});
+
+bindClick('btnDlOnboarding', () => {
+  try {
+    const dateStr = new Date().toISOString().slice(0, 10);
+    const filename = `toast_onboarding_template_${dateStr}.csv`;
+    const toastTable = exportToastRows(S.rows, { format: 'onboarding', onlyApproved: false, strictBarcodes: true });
+    if (toastTable.length <= 1) {
+      throw new Error('No items have valid barcodes ready for Toast Onboarding template.');
+    }
+    const csv = toCsv(toastTable);
+    download(filename, csv);
+    postAiAnnouncement(`⬇️ Downloaded Toast Onboarding Template (${toastTable.length - 1} items) matching 777_Retail_Template format for your Onboarding Consultant!`);
+  } catch (err) {
+    fail('toastStatus', err);
+  }
+});
+
+// Gemini AI Copilot Companion Chat Stream & Quick Chips
+export function postAiAnnouncement(text) {
+  const stream = $('aiChatStream');
+  if (!stream) return;
+  const bubble = document.createElement('div');
+  bubble.className = 'ai-announcement';
+  bubble.innerHTML = `<strong>📢 Progress Update:</strong> ${escapeHtml(text)}`;
+  stream.append(bubble);
+  stream.scrollTop = stream.scrollHeight;
+}
+
+export function appendStreamMessage(role, text) {
+  const stream = $('aiChatStream');
+  if (!stream) return;
+  const msg = document.createElement('div');
+  msg.className = `ai-msg ${role === 'user' ? 'ai-msg-user' : 'ai-msg-assistant'}`;
+
+  const hdr = document.createElement('div');
+  hdr.style.fontWeight = '700';
+  hdr.style.marginBottom = '4px';
+  hdr.style.color = role === 'user' ? '#93c5fd' : '#a5b4fc';
+  hdr.textContent = role === 'user' ? '👤 You' : '🤖 Gemini Copilot';
+
+  const body = document.createElement('div');
+  body.textContent = text;
+
+  msg.append(hdr, body);
+  stream.append(msg);
+  stream.scrollTop = stream.scrollHeight;
+}
+
+async function handleCopilotChat(prompt) {
+  if (!prompt || !prompt.trim()) return;
+  const cleanPrompt = prompt.trim();
+  appendStreamMessage('user', cleanPrompt);
+
+  const btn = $('btnSendAiChat');
+  if (btn) btn.disabled = true;
+
+  const isFormattingIntent = /\b(title\s*case|clean|pack|volume|abbreviation|bottle|size|uppercase|standardize|fix)\b/i.test(cleanPrompt);
+
+  try {
+    if (isFormattingIntent && S.records.length > 0) {
+      // Use AI formatting endpoint for batch diff adjustments
+      const payload = {
+        prompt: cleanPrompt,
+        items: prepareDatasetForAi(S.records, S.rows, 150)
+      };
+
+      const res = await fetch('/api/ai/format', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || 'Failed to process AI request');
+
+      appendStreamMessage('assistant', data.message || 'I have analyzed your items and prepared standardizations.');
+
+      if (data.changes && data.changes.length > 0) {
+        S.currentAiChanges = data.changes;
+        renderDiffSection(data.changes, data.summary);
+      } else {
+        S.currentAiChanges = [];
+        const sec = $('aiDiffSection');
+        setDisplay(sec, 'none');
+      }
+    } else {
+      // General conversational copilot guidance
+      const readyCount = S.rows.filter(isApproved).length;
+      const context = {
+        step: currentWizardStep,
+        totalItems: S.records.length,
+        readyItems: readyCount
+      };
+
+      const res = await fetch('/api/ai/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: cleanPrompt, context })
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || 'Failed to reach Gemini assistant');
+
+      appendStreamMessage('assistant', data.reply || 'I am ready to help you optimize your Toast import.');
+    }
+  } catch (err) {
+    appendStreamMessage('assistant', `⚠️ ${err.message || 'Unable to communicate with Gemini.'}`);
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+bindClick('btnSendAiChat', () => {
+  const input = $('aiChatInput');
+  const txt = input?.value || '';
+  if (input) input.value = '';
+  handleCopilotChat(txt);
+});
+
+const aiChatInput = $('aiChatInput');
+if (aiChatInput) {
+  aiChatInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      const txt = aiChatInput.value;
+      aiChatInput.value = '';
+      handleCopilotChat(txt);
+    }
+  });
+}
+
+// Quick Chip Buttons in Copilot
+if (typeof document !== 'undefined' && typeof document.querySelectorAll === 'function') {
+  const chipPills = document.querySelectorAll('.ai-chip-pill');
+  if (chipPills && typeof chipPills.forEach === 'function') {
+    chipPills.forEach((chip) => {
+      chip.addEventListener('click', () => {
+        const prompt = chip.dataset.prompt;
+        if (prompt) handleCopilotChat(prompt);
+      });
+    });
+  }
+}
+
+// Toggle Copilot Panel
+bindClick('toggleAiCompanionBtn', () => {
+  const panel = $('aiCompanionPanel');
+  if (!panel) return;
+  panel.style.display = panel.style.display === 'none' ? 'flex' : 'none';
+});
 
 

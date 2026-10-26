@@ -1,177 +1,142 @@
-# Barcode 13-Digit Auto-Padding & Gemini AI Dataset Formatting Assistant
+# Foolproof Toast Import Flow with Gemini AI Companion & Confident Edit Controls
 
-Automates the detection and bulk correction of barcode padding anomalies (e.g., spreadsheet-stripped leading zeros to 13-digit EAN-13 standards) and adds a cloud-powered Gemini 3.8 Flash AI chat assistant in a slide-out drawer that allows natural language batch formatting, custom tweaks, and instant diff verification across the inventory dataset.
+Radically simplify the Clover-to-Toast inventory preparation into a clean, guided 4-step wizard with an integrated Gemini AI assistant, confidence-tiered edit flagging, granular item-by-item edit/revert controls, and dual export formats matching the official Toast Onboarding Retail Template.
 
 ## User Review & Critical Decisions
 
 > [!IMPORTANT]
-> The following design and architectural choices have been confirmed and incorporated based on your feedback:
-
-- **Gemini Assistant Presentation**: Slide-out interactive side drawer (collapsible, non-intrusive) with quick-prompt chips, conversational message history, and clear status indicators.
-- **AI Modification Confirmation**: Diff comparison preview drawer/modal showing exact Before → After values, affected row counts, and a single "Approve & Apply to Dataset" button with full undo support.
-- **Barcode 13-Digit Padding Scope**: Identifies all numeric barcodes with fewer than 13 digits (including 10, 11, and 12-digit barcodes stripped by spreadsheet programs) and provides a prominent `"Auto-pad all barcodes to 13 digits"` bulk action button while verifying checksum validity.
-- **Free Cloud Gemini API**: Uses Google's free-tier `gemini-3.8-flash` on the server backend (`/api/ai/format`), ensuring zero API key exposure and no client configuration required.
+> **Key Enhancements Based on Your Feedback**:
+> - **Certainty-Based Edit Flagging in Step 3**: Edits are scored by confidence. Safe standardizations (brand casing, mathematical 13-digit zero-padding) are marked high certainty, while ambiguous abbreviations or fuzzy modifications are distinctly flagged as **"⚠️ Needs Review (Uncertain Logic)"** with clear reasons.
+> - **Granular Edit & Revert Controls**:
+>   - **Individual Row Edits**: Edit item name, category, or barcode directly inline.
+>   - **Individual Remove / Revert**: Single-click "↩️ Revert to Original" button on any row to discard an unwanted edit.
+>   - **1-Click Auto-Fix & Approve All**: Quickly approve all high-certainty items at once, or approve all with one click.
+>   - **Global Reset**: Option to remove all applied edits and return to raw Clover data at any time.
+> - **Interactive Gemini AI Chat Companion**: Live conversational assistant that answers questions, makes milestone progress announcements, and fine-tunes batch edits with interactive diff previews.
+> - **Dual Toast Export Formats**: Direct **Toast Retail Catalog CSV** and official **Toast Onboarding Consultant Template** matching `777_-_Retail_Template` with step-by-step sharing instructions.
 
 ---
 
 ## 1. Overview & Core Concept
 
-### What It Does
-1. **Barcode Padding Inspector & Bulk Fix**:
-   - Detects barcodes where spreadsheet applications (Excel, Google Sheets) stripped leading zeros (such as 10-, 11-, or 12-digit numbers that should be standard 13-digit EAN-13 or 12-digit UPC-A).
-   - Provides a dedicated counter banner and a 1-click button: **"Auto-pad all barcodes to 13 digits"**, immediately standardizing product identities across the entire loaded dataset with check-digit re-validation.
-2. **Gemini AI Formatting Assistant**:
-   - A slide-out side drawer with a conversational assistant tailored for inventory managers and retail store operators.
-   - Users can type requests like *"Make all liquor brand names Title Case"*, *"Convert 'pk' and 'pack' abbreviations to standard 'Pack'"*, or *"Move bottle volumes (e.g., 750ml, 1.75L) to the end of the name"*.
-   - The assistant processes the dataset, generates structured field-level changes, and presents an interactive diff preview table showing affected items before committing changes.
-
-### Target Audience & Persona
-- Retail inventory managers, liquor store operators, and POS administrators migrating or cleaning Clover inventory for Toast POS imports who need automated formatting without manual CSV editing.
-
-### Key Value
-- Eliminates manual barcode editing in spreadsheets that risk stripping leading zeros.
-- Combines rule-based speed with the flexibility of generative AI for custom naming and categorization conventions.
+- **The Problem**: Bulk automated cleanups can make incorrect guesses on unusual retail abbreviations or obscure barcodes. Users need transparency into *why* an edit was made and the ability to accept, reject, or fine-tune individual edits before export.
+- **The Solution**: A clean 4-step wizard with built-in confidence checks:
+  1. **Upload Clover Inventory**: Drop `.xlsx` or `.csv` files; instant item count and health check.
+  2. **Smart Clean Autopilot**: Instant pass applying brand casing, pack-size normalization, and 13-digit barcode padding.
+  3. **Confident Review & Edit Tuning**:
+     - Automatically flags edits where certainty isn't high.
+     - 1-click buttons to approve high-certainty edits, edit fields inline, or remove edits individually.
+  4. **Export & Toast Consultant Handoff**: Full preview with summary metrics, direct Toast CSV, and Toast Onboarding Template with consultant sharing guide.
 
 ---
 
-## 2. User Experience & Visual Design
+## 2. Streamlined User Experience & Step 3 Architecture
 
-### Key User Flows
+### Wizard Navigation & Step 3 Edit Control Layout
 
-#### Flow A: 13-Digit Barcode Auto-Padding
 ```
-[Upload Clover File]
-        │
-        ▼
-[Barcode Analyzer flags N barcodes with missing padding]
-        │
-        ▼
-[Prominent Alert Strip: "N barcodes have missing leading zeros (under 13 digits)"]
-        │
-        ▼
-[Click "Auto-pad all barcodes to 13 digits"]
-        │
-        ▼
-[All eligible barcodes padded to 13 digits with '0' + re-verified]
-        │
-        ▼
-[Success toast & Toast Import readiness counters updated immediately]
-```
-
-#### Flow B: Gemini AI Dataset Formatting via Chat
-```
-[Click "AI Assistant" Button in Header / Workspace Toolbar]
-        │
-        ▼
-[Slide-out Side Drawer opens with quick prompt suggestions]
-        │
-        ▼
-[User inputs custom prompt: "Standardize beer 6-packs and format volume units"]
-        │
-        ▼
-[Server executes Gemini 3.8 Flash with structured schema output]
-        │
-        ▼
-[Diff Preview Card appears: "42 items proposed for update" with Before / After table]
-        │
-        ▼
-[Click "Approve & Apply Changes" -> Dataset updated, Undo toast appears]
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  Toast Import Wizard Header (Step 1 ─▶ Step 2 ─▶ Step 3 ─▶ Step 4)          │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ STEP 3: REVIEW & FINE-TUNE EDITS                                            │
+│                                                                             │
+│ [⚡ Auto-Approve High-Certainty (810)]  [Approve All]  [↩️ Remove All Edits] │
+│                                                                             │
+│ ⚠️ Flagged for Review (4 items with uncertain logic):                       │
+│ ┌─────────────────────────────────────────────────────────────────────────┐ │
+│ │ Item #14: KANVA CHARD 750                                               │ │
+│ │ Proposed: Kanva Chardonnay 750ml  [⚠️ Review: Abbreviation ambiguous]   │ │
+│ │ • Name:     [ Kanva Chardonnay 750ml                    ] (editable)    │ │
+│ │ • Category: [ Wine                                    ▼ ] (editable)    │ │
+│ │ • Barcode:  [ 0123456789012                             ] (editable)    │ │
+│ │ Actions:    [ ✓ Accept Edit ]  [ ✕ Revert to Original ]                 │ │
+│ └─────────────────────────────────────────────────────────────────────────┘ │
+│ ┌─────────────────────────────────────────────────────────────────────────┐ │
+│ │ Item #89: JOSE CUERVO GOLD                                              │ │
+│ │ Proposed: Jose Cuervo Especial Gold Tequila 750ml                       │ │
+│ │ [✓ High Certainty: Verified Brand & Catalog Match]                      │ │
+│ │ Actions:    [ ✓ Accepted ]     [ ✕ Revert to Original ]                 │ │
+│ └─────────────────────────────────────────────────────────────────────────┘ │
+│                                                                             │
+│ ➔ Primary Action: [ Continue to Final Toast Export ➔ ]                      │
+└─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### Visual Identity & Theme
-- **Theme Foundation**: Clean SaaS industrial aesthetic following `@frontend-design` and `references/3_saas_dashboard.md`.
-- **Color Palette (60-30-10 Rule)**:
-  - 60% Canvas: Slate dark `#0f172a` / `#1e293b` with neutral contrast.
-  - 30% Structural: Surface panels `#1e293b` with 1px hairline borders (`rgba(255,255,255,0.08)`).
-  - 10% Accents: Amber/Orange (`#f97316`) for barcode & Toast import actions; Electric Indigo/Cyan (`#6366f1` / `#38bdf8`) for the Gemini AI assistant.
-- **Typography**: Clean contemporary sans (`Plus Jakarta Sans`) paired with tabular monospace (`JetBrains Mono` / `tabular-nums`) for barcode digits, SKU numbers, and prices.
-- **Top Bar Contract**:
-  - Left: App Wordmark `Clover → Toast Cleaner`.
-  - Center: Clean single-line links (`Inventory Review`, `Spelling Rules`, `Toast Export`).
-  - Right: Quick Action `✨ AI Assistant` button and `1-Click Auto Process`.
+### Edit Certainty & Flagging Rules
+- **High Certainty (Green)**:
+  - Exact brand title-casing (e.g. `TITO'S` → `Tito's`, `CORONA` → `Corona`).
+  - Standardized pack formats (e.g. `12PK` → `12-Pack`, `6PK` → `6-Pack`).
+  - Mathematical 13-digit EAN zero-padding where the check digit is mathematically verified.
+- **Needs Review / Flagged (Amber Alert)**:
+  - Ambiguous abbreviations with multiple plausible meanings (e.g. `CHARD` = Chardonnay vs Charcuterie; `SM` = Small vs Smirnoff).
+  - Fuzzy string match distance > 2 characters.
+  - Category assignments where multiple departments could match.
+  - Items with missing prices or duplicate barcodes across different products.
 
 ---
 
 ## 3. Key Product Decisions & Trade-Offs
 
-### 1. Barcode Padding Algorithm
-- **Chosen Approach**: Standardize padding to 13 digits (`digits.padStart(13, '0')`) while checking validity for both EAN-13 and UPC-A (12-digit with leading zero). Barcodes between 8 and 12 digits are safely padded and re-analyzed with `checkDigitOk`.
-- **Why**: Retail scanners and Toast POS barcode databases natively resolve 12-digit UPCs as 13-digit EANs prefixed by `0`. This guarantees consistent product identity without losing check-digit integrity.
-- **Alternative Considered**: Padding blindly without validation (rejected because it would turn invalid scans into fake barcodes).
-
-### 2. Server-Side Gemini API Proxy vs Client-Side Direct Calls
-- **Chosen Approach**: Express backend route (`/api/ai/format`) using the official `@google/genai` TypeScript/ESM SDK with model `gemini-3.8-flash`.
-- **Why**: Strictly adheres to security constraints (API keys are never exposed in browser bundles, no key entry UI in frontend) and allows the server to inject structured system prompts and response schemas.
-
-### 3. AI Modification Confirmation Strategy
-- **Chosen Approach**: Structured JSON schema output from Gemini returning `[ { rowId, field, originalValue, proposedValue, reason } ]`. The frontend renders a clear diff table before any state mutation occurs.
-- **Why**: Prevents accidental data corruption, gives inventory managers complete trust and transparency, and enables one-click rollback.
+- **Decision 1: Individual Row Revert & Edit vs. All-or-Nothing**
+  - *Chosen Approach*: Every modified row displays an inline editable field and an instant "✕ Revert to Original" button.
+  - *Why*: Gives users complete control to keep good automated edits while easily removing questionable ones.
+- **Decision 2: Automated Certainty Scoring**
+  - *Chosen Approach*: Categorize proposed changes into High Certainty vs. Needs Review, allowing one-click bulk approval of safe items while isolating items requiring human eyes.
+  - *Why*: Saves operators from auditing 800+ obvious fixes just to find the 3 ambiguous items.
+- **Decision 3: Global Reset / Revert**
+  - *Chosen Approach*: Provide a clean "↩️ Remove All Edits" option in the toolbar.
+  - *Why*: Allows users to start fresh without re-uploading the file if they experiment with custom rules or AI instructions.
 
 ---
 
-## 4. Technical Architecture & Data Strategy
-
-### System Architecture Diagram
+## 4. Technical Architecture & Implementation Steps
 
 ```
-┌────────────────────────────────────────────────────────────────────────┐
-│                        Browser Client (app.js)                         │
-│                                                                        │
-│  ┌───────────────────────┐  ┌──────────────────────────────────────┐  │
-│  │   Hero & Dropzone     │  │      Barcode Padding Banner          │  │
-│  │ 1-Click Auto Process  │  │ "Auto-pad all barcodes to 13 digits" │  │
-│  └───────────┬───────────┘  └──────────────────┬───────────────────┘  │
-│              │                                 │                      │
-│              ▼                                 ▼                      │
-│  ┌─────────────────────────────────────────────────────────────────┐  │
-│  │            Inventory State Store (S.rows, S.records)            │  │
-│  └───────────▲─────────────────────────────────┬───────────────────┘  │
-│              │                                 │                      │
-│              │ Diff Approval                   │ Row Context          │
-│              │                                 ▼                      │
-│  ┌───────────┴───────────┐         ┌───────────────────────────────┐  │
-│  │    Diff Preview Modal │         │      AI Assistant Drawer      │  │
-│  │   [Approve / Reject]  │         │   Chat input & Quick Chips    │  │
-│  └───────────────────────┘         └───────────────┬───────────────┘  │
-└────────────────────────────────────────────────────┼───────────────────┘
-                                                     │ POST /api/ai/format
-                                                     ▼
-┌────────────────────────────────────────────────────────────────────────┐
-│                        Node / Express Server                           │
-│                                                                        │
-│  ┌──────────────────────────────────────────────────────────────────┐  │
-│  │ POST /api/ai/format                                              │  │
-│  │ • Validates payload & filters item samples                       │  │
-│  │ • Initializes GoogleGenAI(process.env.GEMINI_API_KEY)            │  │
-│  │ • System prompt: Inventory Standardization Expert                │  │
-│  │ • Model: gemini-3.8-flash with JSON responseSchema               │  │
-│  └──────────────────────────────────┬───────────────────────────────┘  │
-└─────────────────────────────────────┼──────────────────────────────────┘
-                                      │
-                                      ▼
-                   ┌────────────────────────────────────┐
-                   │     Google Cloud Gemini 3.8 API    │
-                   │        (gemini-3.8-flash)          │
-                   └────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                            Central State Engine                             │
+│   currentStep: 1 | 2 | 3 | 4                                                │
+│   records: Original Clover rows (immutable backup for clean reverts)        │
+│   rows: Working item state with decisions { name, category, barcode }       │
+│   editMetadata: { [rowId]: { modified: bool, certainty: 'high'|'review',    │
+│                              reasons: string[], original: obj } }           │
+└──────────────────────────────────────┬──────────────────────────────────────┘
+                                       │
+     ┌─────────────────────────────────┼─────────────────────────────────┐
+     ▼                                 ▼                                 ▼
+┌────────────────────────┐  ┌────────────────────────┐  ┌────────────────────────┐
+│      src/toast.js      │  │   app.js (Wizard & AI) │  │   index.html & CSS     │
+│ • buildToastOnboarding │  │ • computeCertainty()   │  │ • Step 3 Edit Toolbar  │
+│ • buildToastRetailRow  │  │ • revertRowEdit(id)    │  │ • Inline Edit Inputs   │
+│ • computeToastSummary  │  │ • revertAllEdits()     │  │ • Certainty Badges     │
+│ • exportToastRows      │  │ • inlineEditHandler()  │  │ • Revert Buttons (✕)   │
+└────────────────────────┘  └────────────────────────┘  └────────────────────────┘
 ```
 
-### Component & State Mapping
+### Specific Implementation Stages:
 
-1. **`src/barcode.js` & `app.js` Barcode Padding**:
-   - `findPaddingAnomalies(rows)`: Identifies items with numeric barcodes of length 8–12.
-   - `autoPadBarcodes13(rows)`: Pads eligible barcodes to 13 digits with leading zeros, re-executes `analyzeBarcode`, updates `row.barcode`, and refreshes Toast readiness metrics.
-   - UI Element `#btnAutoPad13`: Prominent button in the barcode review section and hero banner with live count indicator.
+1. **Certainty Scoring & Edit Tracking (`src/review.js` & `src/spellcheck.js`)**:
+   - Tag proposals with certainty flags (`high` vs `review-recommended`) based on match confidence, abbreviation ambiguity, and barcode verification.
+   - Maintain original snapshot references on every row to support instant individual or bulk revert.
 
-2. **`server.js` Backend Route**:
-   - Install `@google/genai` dependency.
-   - Route `POST /api/ai/format`: Receives user instruction and inventory sample/records, issues `ai.models.generateContent` with `gemini-3.8-flash` using structured JSON output schema, and returns proposed changes.
+2. **Step 3 UI & Inline Edit Handlers (`app.js` & `index.html`)**:
+   - Build the Step 3 review toolbar with:
+     - `⚡ Auto-Approve High-Certainty Edits`
+     - `Approve All`
+     - `↩️ Remove All Edits`
+     - Filter toggle: `Show Flagged Only` vs `Show All`
+   - Render inline editable inputs for Name, Category, and Barcode.
+   - Provide row-level `[ ✓ Accept ]` and `[ ✕ Revert to Original ]` action buttons.
 
-3. **`index.html` & `style.css` UI Elements**:
-   - Slide-out AI Assistant Drawer (`#aiDrawer`) with conversational message thread, quick prompt chips (e.g., "Clean bottle sizes", "Standardize brand casing", "Clean up alcohol ABV"), and prompt textarea.
-   - Floating/Header AI button with keyboard shortcut (`Alt + A`).
-   - Diff Preview Container (`#aiDiffModal` / `#aiDiffContainer`) with high-density before/after comparison table and "Approve & Apply" action.
+3. **Gemini AI Chat Companion & Announcements (`server.js` & `app.js`)**:
+   - Real-time conversational announcements in the chat stream:
+     - Announce flagged items count: `"⚠️ Found 4 items with ambiguous abbreviations that need your quick review in Step 3."`
+   - Support conversational fine-tuning ("Undo changes to item #14" or "Keep original names for beer").
 
-4. **Safety & Verification**:
-   - Unit tests in `tests/barcode.test.js` verifying 13-digit padding and check digit preservation.
-   - Tests in `tests/ai_format.test.js` testing diff parsing and state updates.
-   - All tests passing with `npm test`, clean `npm run lint`, and verified build compilation.
+4. **Toast Retail & Onboarding Consultant Formats (`src/toast.js`)**:
+   - `TOAST_RETAIL_HEADERS` for direct Toast Web CSV.
+   - `TOAST_ONBOARDING_HEADERS` matching `777_-_Retail_Template` with embedded consultant sharing guidance.
+   - Preview modal with sticky total count and average price summary footer.
+
+5. **Testing & Verification**:
+   - Update tests in `tests/review.test.js`, `tests/spellcheck.test.js`, and `tests/toast_preview.test.js` to verify individual row revert, bulk revert, certainty calculation, and export integrity.
+   - Run `npm test`, `lint_applet`, and verify dev server build.

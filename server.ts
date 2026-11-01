@@ -8,18 +8,12 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 const app = express();
-// Port 3000 is required by the AI Studio environment iframe proxy
 const PORT = 3000;
 const ALT_PORT = process.env.PORT && Number(process.env.PORT) !== 3000 ? Number(process.env.PORT) : null;
 const HOST = '0.0.0.0';
 
-// Support JSON payloads up to 15MB for dataset batches
 app.use(express.json({ limit: '15mb' }));
 
-// Static files
-app.use(express.static(__dirname));
-
-// Initialize GoogleGenAI SDK instance
 const ai = new GoogleGenAI({
   apiKey: process.env.GEMINI_API_KEY,
   httpOptions: {
@@ -31,7 +25,6 @@ const ai = new GoogleGenAI({
 
 /**
  * POST /api/ai/format
- * Formats inventory dataset items using Gemini 3.8 Flash with structured output schema.
  */
 app.post('/api/ai/format', async (req, res) => {
   try {
@@ -43,7 +36,6 @@ app.post('/api/ai/format', async (req, res) => {
       return res.status(400).json({ ok: false, error: 'An array of inventory items is required.' });
     }
 
-    // Limit to 150 items to keep latency fast and remain well within token constraints
     const sampleItems = items.slice(0, 150).map((item) => ({
       id: String(item.id || ''),
       name: String(item.name || item.current_name || ''),
@@ -106,14 +98,14 @@ ${JSON.stringify(sampleItems, null, 2)}`;
       }
     });
 
-    const parsed = JSON.parse(response.text.trim());
+    const parsed = JSON.parse(response.text?.trim() || '{}');
     return res.json({
       ok: true,
       message: parsed.message || 'Formatting proposals generated.',
       summary: parsed.summary || `Proposed adjustments for ${parsed.changes?.length || 0} items.`,
       changes: Array.isArray(parsed.changes) ? parsed.changes : []
     });
-  } catch (err) {
+  } catch (err: any) {
     console.warn('Gemini cloud API call failed or key unconfigured, using smart retail formatter:', err.message);
     const fallback = generateRuleBasedFormatting(req.body.prompt, req.body.items || []);
     return res.json({
@@ -127,7 +119,6 @@ ${JSON.stringify(sampleItems, null, 2)}`;
 
 /**
  * POST /api/ai/chat
- * Conversational assistant for retail & Toast POS questions and workflow guidance.
  */
 app.post('/api/ai/chat', async (req, res) => {
   try {
@@ -156,7 +147,7 @@ Provide clear, reassuring, and concise advice. If the user asks you to modify it
       ok: true,
       reply: response.text || 'No response generated.'
     });
-  } catch (err) {
+  } catch (err: any) {
     console.warn('AI chat error (fallback provided):', err.message);
     return res.json({
       ok: true,
@@ -165,25 +156,38 @@ Provide clear, reassuring, and concise advice. If the user asks you to modify it
   }
 });
 
-// Fallback to index.html for unmatched routes
-app.use((req, res) => {
-  res.sendFile(join(__dirname, 'index.html'));
-});
+async function startServer() {
+  const isDev = process.env.NODE_ENV !== 'production';
 
-// Listen on primary port 3000 (required for AI Studio web dev server)
-app.listen(PORT, HOST, () => {
-  console.log(`Server running at http://${HOST}:${PORT}`);
-});
-
-// Also listen on alternate port if specified by host container
-if (ALT_PORT) {
-  try {
-    app.listen(ALT_PORT, HOST, () => {
-      console.log(`Also listening at http://${HOST}:${ALT_PORT}`);
+  if (isDev) {
+    const { createServer: createViteServer } = await import('vite');
+    const vite = await createViteServer({
+      server: { middlewareMode: true },
+      appType: 'spa'
     });
-  } catch (err) {
-    console.warn(`Could not listen on alternate port ${ALT_PORT}:`, err.message);
+    app.use(vite.middlewares);
+  } else {
+    app.use(express.static(join(__dirname, 'dist')));
+    app.use((req, res) => {
+      res.sendFile(join(__dirname, 'dist', 'index.html'));
+    });
+  }
+
+  app.listen(PORT, HOST, () => {
+    console.log(`Server running at http://${HOST}:${PORT}`);
+  });
+
+  if (ALT_PORT) {
+    try {
+      app.listen(ALT_PORT, HOST, () => {
+        console.log(`Also listening at http://${HOST}:${ALT_PORT}`);
+      });
+    } catch (err: any) {
+      console.warn(`Could not listen on alternate port ${ALT_PORT}:`, err.message);
+    }
   }
 }
 
-export { app, generateRuleBasedFormatting };
+startServer();
+
+export { app };

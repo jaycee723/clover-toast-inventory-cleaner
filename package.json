@@ -4,10 +4,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "node server.js",
-    "start": "node server.js",
-    "build": "node -e \"process.exit(0)\"",
-    "lint": "node --check app.js server.js src/*.js",
+    "dev": "tsx server.ts",
+    "start": "tsx server.ts",
+    "build": "vite build",
+    "lint": "tsc --noEmit",
     "test": "node --test tests/*.test.js"
   },
   "engines": {
@@ -16,10 +16,20 @@
   "dependencies": {
     "@google/genai": "^2.30.0",
     "express": "^5.3.0",
-    "firebase": "^13.0.0"
+    "firebase": "^13.0.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1"
   },
   "devDependencies": {
     "@firebase/eslint-plugin-security-rules": "^0.0.2",
-    "eslint": "^10.12.0"
+    "@types/express": "^5.0.6",
+    "@types/node": "^26.6.6",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.2",
+    "eslint": "^10.12.0",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.5"
   }
 }

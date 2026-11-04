@@ -22,7 +22,23 @@ test('generateRuleBasedFormatting title-cases brands and standardizes volumes', 
 
   const kj = res.changes.find((c) => c.id === 'r3' && c.field === 'name');
   assert.ok(kj);
-  assert.match(kj.proposedValue, /1.75L/);
+  assert.match(kj.proposedValue, /1.75\s*L/);
+});
+
+test('generateRuleBasedFormatting respects capitalization rules (11oz, 1 L)', () => {
+  const items = [
+    { id: 'oz1', name: 'BUD LIGHT 11 OZ CAN', category: '' },
+    { id: 'l1', name: 'SMIRNOFF VODKA 1L', category: '' }
+  ];
+
+  const res = generateRuleBasedFormatting('Standardize bottle volume and oz sizes', items);
+  const bud = res.changes.find((c) => c.id === 'oz1');
+  assert.ok(bud);
+  assert.match(bud.proposedValue, /11oz/);
+
+  const smirnoff = res.changes.find((c) => c.id === 'l1');
+  assert.ok(smirnoff);
+  assert.match(smirnoff.proposedValue, /1 L/);
 });
 
 test('generateRuleBasedFormatting auto-categorizes liquor, beer, wine', () => {

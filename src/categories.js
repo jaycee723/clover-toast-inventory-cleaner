@@ -32,6 +32,203 @@ export function findCanonical(list, wanted) {
 export function splitCategories(value) {
   return String(value ?? '').split(',').map((s) => s.trim()).filter(Boolean);
 }
+
+export const GENERIC_CATEGORIES = new Set([
+  '',
+  'general retail',
+  'general',
+  'retail',
+  'uncategorized',
+  'none',
+  'misc',
+  'miscellaneous',
+  'other',
+  'default',
+  'items',
+  'inventory',
+  'store',
+  'merchandise',
+  'n/a',
+  'na',
+  'unknown',
+  'various'
+]);
+
+export function isGenericCategory(cat) {
+  const c = collapse(cat);
+  if (!c) return true;
+  if (GENERIC_CATEGORIES.has(c)) return true;
+  if (NON_PRODUCT.has(c)) return true;
+  return false;
+}
+
+const STOP_WORDS = new Set([
+  'and', '&', 'of', 'the', 'with', 'in', 'for', 'a', 'an', 'to', 'by', 'at', 'on',
+  'pack', 'pk', 'pck', 'count', 'ct', 'case', 'cs', 'btl', 'bottle', 'bottles', 'can', 'cans',
+  'ml', 'l', 'oz', 'fl', 'gal', 'pt', 'qt', 'liter', 'litre'
+]);
+
+function extractCategoryTokens(name) {
+  if (!name) return [];
+  const cleaned = String(name)
+    .replace(/\b\d+(\.\d+)?\s*(ml|l|fl\s*oz|oz|pack|pk|ct)\b/gi, '')
+    .replace(/[^\w\s]/g, ' ');
+  return cleaned
+    .toLowerCase()
+    .split(/\s+/)
+    .filter((w) => w.length >= 3 && !STOP_WORDS.has(w) && !/^\d+$/.test(w));
+}
+
+/**
+ * Smart Categorize uses existing category-item mappings in the inventory dataset
+ * to learn and suggest specific categories for items currently missing a category
+ * or assigned to a generic one (e.g. 'General Retail', 'Uncategorized').
+ * Falls back to canonical rules if no catalog match is found.
+ */
+export function smartCategorizeInventory(rows, { canonical = [], autoApply = false } = {}) {
+  // Step 1: Learn mappings from all items with valid, non-generic specific categories
+  const tokenCategoryWeights = new Map();
+  const phraseCategoryWeights = new Map();
+  const brandCategoryWeights = new Map();
+
+  for (const r of rows) {
+    const rawCat = r.category || (r.existingCategories && r.existingCategories[0]) || '';
+    if (isGenericCategory(rawCat)) continue;
+
+    const primaryCat = splitCategories(rawCat)[0] || rawCat;
+
+    // Index brand
+    if (r.brand && String(r.brand).trim()) {
+      const b = collapse(r.brand);
+      if (!brandCategoryWeights.has(b)) brandCategoryWeights.set(b, new Map());
+      const m = brandCategoryWeights.get(b);
+      m.set(primaryCat, (m.get(primaryCat) || 0) + 5);
+    }
+
+    // Index tokens & 2-word phrases
+    const itemName = r.current_name || r.original_name || '';
+    const tokens = extractCategoryTokens(itemName);
+    for (const t of tokens) {
+      if (!tokenCategoryWeights.has(t)) tokenCategoryWeights.set(t, new Map());
+      const m = tokenCategoryWeights.get(t);
+      m.set(primaryCat, (m.get(primaryCat) || 0) + 1);
+    }
+
+    for (let i = 0; i < tokens.length - 1; i++) {
+      const phrase = `${tokens[i]} ${tokens[i + 1]}`;
+      if (!phraseCategoryWeights.has(phrase)) phraseCategoryWeights.set(phrase, new Map());
+      const m = phraseCategoryWeights.get(phrase);
+      m.set(primaryCat, (m.get(primaryCat) || 0) + 4);
+    }
+  }
+
+  const suggestions = [];
+
+  // Step 2: Suggest categories for rows with missing or generic category
+  for (const r of rows) {
+    const rawCat = r.category || '';
+    if (!isGenericCategory(rawCat)) continue;
+
+    const itemName = r.current_name || r.original_name || '';
+    const scores = new Map();
+
+    // Check brand
+    if (r.brand && String(r.brand).trim()) {
+      const b = collapse(r.brand);
+      const bMap = brandCategoryWeights.get(b);
+      if (bMap) {
+        for (const [cat, weight] of bMap.entries()) {
+          scores.set(cat, (scores.get(cat) || 0) + weight * 2);
+        }
+      }
+    }
+
+    // Check phrases and tokens from item name
+    const tokens = extractCategoryTokens(itemName);
+    for (let i = 0; i < tokens.length - 1; i++) {
+      const phrase = `${tokens[i]} ${tokens[i + 1]}`;
+      const pMap = phraseCategoryWeights.get(phrase);
+      if (pMap) {
+        for (const [cat, weight] of pMap.entries()) {
+          scores.set(cat, (scores.get(cat) || 0) + weight);
+        }
+      }
+    }
+
+    for (const t of tokens) {
+      const tMap = tokenCategoryWeights.get(t);
+      if (tMap) {
+        for (const [cat, weight] of tMap.entries()) {
+          scores.set(cat, (scores.get(cat) || 0) + weight);
+        }
+      }
+    }
+
+    let bestCategory = null;
+    let highestScore = 0;
+    for (const [cat, score] of scores.entries()) {
+      if (score > highestScore) {
+        highestScore = score;
+        bestCategory = cat;
+      }
+    }
+
+    let source = '';
+    if (bestCategory && highestScore >= 2) {
+      source = 'catalog_mapping';
+    } else {
+      // Fallback to domain RULES
+      for (const rule of RULES) {
+        if (rule.test.test(itemName)) {
+          const canon = findCanonical(canonical, rule.to);
+          bestCategory = canon || rule.to;
+          source = `rule (${rule.id})`;
+          break;
+        }
+      }
+    }
+
+    if (bestCategory) {
+      r.proposed_category = bestCategory;
+      r.category_source = source;
+      if (r.category_conflicts) {
+        r.category_conflicts = r.category_conflicts.filter((c) => !/general|uncategorized/i.test(c));
+      }
+
+      if (autoApply) {
+        if (!r._originalSnapshot) {
+          r._originalSnapshot = {
+            current_name: r.current_name,
+            category: r.category,
+            barcodeOriginal: r.barcode?.original,
+            price: r.price
+          };
+        }
+        r.category = bestCategory;
+        if (r.decisions) {
+          r.decisions.category = 'accept';
+        }
+        r.manuallyEdited = true;
+      }
+
+      suggestions.push({
+        id: r.id,
+        name: itemName,
+        oldCategory: rawCat || '(missing)',
+        newCategory: bestCategory,
+        source,
+        score: highestScore
+      });
+    }
+  }
+
+  return {
+    totalRows: rows.length,
+    improvedCount: suggestions.length,
+    suggestions
+  };
+}
+
 export function evaluateCategory(name, existingValue, canonical) {
   const existing = splitCategories(existingValue);
   const conflicts = [];
@@ -45,3 +242,4 @@ export function evaluateCategory(name, existingValue, canonical) {
   }
   return { existing, conflicts, suggestion, rule };
 }
+

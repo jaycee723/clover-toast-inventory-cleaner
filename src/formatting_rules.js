@@ -23,15 +23,15 @@ export function generateRuleBasedFormatting(prompt, items) {
       }
     }
 
-    // Volume / Size standardization
-    if (p.includes('bottle') || p.includes('volume') || p.includes('size') || p.includes('ml') || p.includes('liter')) {
+    // Volume / Size standardization (e.g. 11oz, 1 L, 750ml)
+    if (p.includes('bottle') || p.includes('volume') || p.includes('size') || p.includes('ml') || p.includes('liter') || p.includes('standard') || p.includes('oz')) {
       const volNormalized = newName
         .replace(/(\d+)\s*([mM][lL])\b/g, '$1ml')
-        .replace(/(\d+(?:\.\d+)?)\s*([lL]|[lL][tT][rR])\b/g, '$1L')
+        .replace(/(\d+(?:\.\d+)?)\s*([lL]|[lL][tT][rR])\b/g, '$1 L')
         .replace(/(\d+)\s*([oO][zZ])\b/g, '$1oz');
       if (volNormalized !== newName) {
         newName = volNormalized;
-        reasons.push('Standardized bottle volume notation');
+        reasons.push('Standardized bottle volume notation (e.g. 11oz, 1 L)');
       }
     }
 
@@ -48,7 +48,7 @@ export function generateRuleBasedFormatting(prompt, items) {
 
     // Suffix ordering: move volume or pack to end if requested
     if (p.includes('end') && (p.includes('volume') || p.includes('size'))) {
-      const volMatch = newName.match(/\b(\d+(?:\.\d+)?(?:ml|L|oz))\b/i);
+      const volMatch = newName.match(/\b(\d+(?:\.\d+)?\s*(?:ml|mL|L|oz))\b/i);
       if (volMatch && !newName.trim().endsWith(volMatch[1])) {
         const cleaned = newName.replace(volMatch[0], '').replace(/\s+/g, ' ').trim();
         newName = `${cleaned} ${volMatch[1]}`;

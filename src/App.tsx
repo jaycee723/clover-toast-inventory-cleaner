@@ -63,8 +63,11 @@ import {
   prepareDatasetForAi,
   computeDiffPreview,
   applyAiChanges,
-  revertAiChanges
+  revertAiChanges,
+  applySingleAiChange,
+  revertSingleAiChange
 } from './ai_assistant.js';
+import { smartCategorizeInventory } from './categories.js';
 import { SAMPLE_777_INVENTORY } from './sample_data.ts';
 
 function downloadFile(name: string, content: string, type: string = 'text/csv;charset=utf-8') {
@@ -150,6 +153,21 @@ export function App() {
   const [aiDiffSummary, setAiDiffSummary] = useState<string>('');
   const [lastAiUndoSnapshot, setLastAiUndoSnapshot] = useState<any | null>(null);
   const [aiUndoBanner, setAiUndoBanner] = useState<string>('');
+
+  // Gemini Online Search Scan & Interactive Corrections
+  const [isScanningOnline, setIsScanningOnline] = useState<boolean>(false);
+  const [scanProgress, setScanProgress] = useState<{ current: number; total: number; message: string } | null>(null);
+  const [onlineCorrectionsModalOpen, setOnlineCorrectionsModalOpen] = useState<boolean>(false);
+  const [onlineCorrections, setOnlineCorrections] = useState<Array<{
+    id: string;
+    itemName: string;
+    field: string;
+    originalValue: string;
+    proposedValue: string;
+    reason: string;
+    applied: boolean;
+    undoRecord?: any;
+  }>>([]);
 
   // Auth & Cloud State
   const [currentUser, setCurrentUser] = useState<any>(null);
@@ -367,6 +385,240 @@ export function App() {
     setRows([...rows]);
     postAnnouncement(`↩️ Reset all ${count} catalog items back to their original Clover imported state.`);
   };
+
+  // Express 1-Click Full Clean (Zero-friction few-clicks experience)
+  const handleInstantFullCleanAndExport = () => {
+    if (!records.length) {
+      setStatusText('Please load an inventory file in Step 1 first.');
+      return;
+    }
+
+    const unitsRules = SPELLCHECK_PRESETS.units?.rules || [];
+    const liquorRules = SPELLCHECK_PRESETS.liquor?.rules || [];
+    const combined = [...unitsRules, ...liquorRules];
+
+    const updatedAliases = [...aliases];
+    for (const r of combined) {
+      if (!updatedAliases.some((a) => a.from.toUpperCase() === r.from.toUpperCase())) {
+        updatedAliases.push({ ...r, approved: true });
+      }
+    }
+    setAliases(updatedAliases);
+
+    // Auto-pad barcodes to 13 digits
+    const padRes = autoPadBarcodes13(records, rows);
+    setRecords([...records]);
+
+    // Build rows with updated aliases
+    const updatedRows = rebuildCatalog(records, updatedAliases, refs, false);
+
+    // Smart Categorize missing or generic categories
+    const catRes = smartCategorizeInventory(updatedRows, { canonical, autoApply: true });
+
+    // Accept clean barcodes & safe proposals
+    acceptCleanBarcodes(updatedRows);
+    autoApproveSafeProposals(updatedRows);
+    autoApproveHighCertainty(updatedRows);
+
+    setRows([...updatedRows]);
+
+    const readyToast = updatedRows.filter(isApproved).length;
+    setScorecard({
+      brandsTitleCased: updatedRows.length,
+      packsNormalized: combined.length,
+      barcodesPadded: padRes.paddedCount,
+      totalToastReady: readyToast
+    });
+
+    setCurrentStep(4);
+    postAnnouncement(`🚀 1-Click Clean Complete! Standardized packaging & casing, padded ${padRes.paddedCount} barcodes, smart-categorized ${catRes.improvedCount} items, and validated ${readyToast} items ready for Toast POS!`);
+    openToastPreview('retail');
+  };
+
+  // Smart Categorize: Uses catalog category-item mappings to auto-assign specific categories
+  const handleSmartCategorize = () => {
+    if (!rows.length) {
+      setStatusText('No inventory loaded. Load items in Step 1 first.');
+      return;
+    }
+    const result = smartCategorizeInventory(rows, { canonical, autoApply: true });
+    setRows([...rows]);
+    const ready = rows.filter(isApproved).length;
+    if (result.improvedCount > 0) {
+      postAnnouncement(`🏷️ Smart Categorize: Assigned specific categories to ${result.improvedCount} items based on catalog patterns! Live status: ${ready} approved, ${rows.length - ready} unapproved.`);
+      setStatusText(`Smart Categorize: Inferred specific categories for ${result.improvedCount} items.`);
+    } else {
+      postAnnouncement(`🏷️ Smart Categorize: All catalog items already possess specific, non-generic categories.`);
+      setStatusText('All items already have specific categories.');
+    }
+  };
+
+  // Complete Gemini Online Search Scan on unapproved items
+  const handleRunOnlineSearchScan = async () => {
+    if (!rows.length) {
+      setStatusText('No inventory items to scan. Please load a file first.');
+      return;
+    }
+    const unapproved = rows.filter((r) => !isApproved(r));
+    if (unapproved.length === 0) {
+      postAnnouncement('🎉 All items in your catalog are already verified and approved for Toast POS export!');
+      setStatusText('All items are approved! No corrections needed.');
+      return;
+    }
+
+    setIsScanningOnline(true);
+    setScanProgress({
+      current: 0,
+      total: unapproved.length,
+      message: `Starting online search scan on ${unapproved.length} unapproved items...`
+    });
+    postAnnouncement(`🌐 Starting Gemini Online Search Scan across all ${unapproved.length} unapproved items in your inventory...`);
+
+    const batchSize = 25;
+    const allCorrections: any[] = [];
+
+    try {
+      for (let i = 0; i < unapproved.length; i += batchSize) {
+        const batch = unapproved.slice(i, i + batchSize);
+        setScanProgress({
+          current: i,
+          total: unapproved.length,
+          message: `Scanning unapproved items ${i + 1} to ${Math.min(i + batchSize, unapproved.length)} of ${unapproved.length}...`
+        });
+
+        const payload = {
+          items: batch.map((r) => ({
+            id: r.id,
+            name: r.current_name || r.original_name,
+            barcode: r.barcode?.original || '',
+            category: r.category || '',
+            price: r.price || '',
+            issues: issues(r)
+          }))
+        };
+
+        const res = await fetch('/api/ai/online-search-scan', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (data.corrections && Array.isArray(data.corrections)) {
+          for (const corr of data.corrections) {
+            allCorrections.push({
+              ...corr,
+              applied: false
+            });
+          }
+        }
+      }
+
+      setScanProgress({
+        current: unapproved.length,
+        total: unapproved.length,
+        message: `Scan complete! Evaluated ${unapproved.length} unapproved items.`
+      });
+
+      if (allCorrections.length === 0) {
+        postAnnouncement(`🌐 Gemini Online Search Scan evaluated ${unapproved.length} unapproved items. All items meet retail packaging and naming standards.`);
+        setStatusText(`Online scan complete: No additional corrections needed.`);
+      } else {
+        setOnlineCorrections(allCorrections);
+        setOnlineCorrectionsModalOpen(true);
+        postAnnouncement(`🌐 Gemini Online Search found ${allCorrections.length} correction(s) for unapproved items! Opening interactive preview...`);
+      }
+    } catch (err: any) {
+      postAnnouncement(`⚠️ Gemini Online Search error: ${err.message || String(err)}`);
+      setStatusText(`Scan error: ${err.message || String(err)}`);
+    } finally {
+      setIsScanningOnline(false);
+    }
+  };
+
+  // Individual apply and undo for Gemini online corrections
+  const handleApplySingleCorrection = (corrIndex: number) => {
+    const corr = onlineCorrections[corrIndex];
+    if (!corr || corr.applied) return;
+
+    const res = applySingleAiChange(records, rows, corr);
+    if (res.success) {
+      const updated = [...onlineCorrections];
+      updated[corrIndex] = {
+        ...corr,
+        applied: true,
+        undoRecord: res.undoRecord
+      };
+      setOnlineCorrections(updated);
+      setRecords([...records]);
+      setRows([...rows]);
+      const newApproved = rows.filter(isApproved).length;
+      postAnnouncement(`Applied online correction for "${corr.itemName}". Live status: ${newApproved} approved, ${rows.length - newApproved} unapproved.`);
+    }
+  };
+
+  const handleUndoSingleCorrection = (corrIndex: number) => {
+    const corr = onlineCorrections[corrIndex];
+    if (!corr || !corr.applied || !corr.undoRecord) return;
+
+    const success = revertSingleAiChange(records, rows, corr.undoRecord);
+    if (success) {
+      const updated = [...onlineCorrections];
+      updated[corrIndex] = {
+        ...corr,
+        applied: false,
+        undoRecord: undefined
+      };
+      setOnlineCorrections(updated);
+      setRecords([...records]);
+      setRows([...rows]);
+      const newApproved = rows.filter(isApproved).length;
+      postAnnouncement(`Undid online correction for "${corr.itemName}". Live status: ${newApproved} approved, ${rows.length - newApproved} unapproved.`);
+    }
+  };
+
+  const handleApplyAllCorrections = () => {
+    let count = 0;
+    const updated = [...onlineCorrections];
+    for (let i = 0; i < updated.length; i++) {
+      const corr = updated[i];
+      if (!corr.applied) {
+        const res = applySingleAiChange(records, rows, corr);
+        if (res.success) {
+          updated[i] = { ...corr, applied: true, undoRecord: res.undoRecord };
+          count++;
+        }
+      }
+    }
+    setOnlineCorrections(updated);
+    setRecords([...records]);
+    setRows([...rows]);
+    const newApproved = rows.filter(isApproved).length;
+    postAnnouncement(`✓ Applied ${count} Gemini online corrections! Live status: ${newApproved} approved, ${rows.length - newApproved} unapproved.`);
+  };
+
+  const handleUndoAllCorrections = () => {
+    let count = 0;
+    const updated = [...onlineCorrections];
+    for (let i = 0; i < updated.length; i++) {
+      const corr = updated[i];
+      if (corr.applied && corr.undoRecord) {
+        revertSingleAiChange(records, rows, corr.undoRecord);
+        updated[i] = { ...corr, applied: false, undoRecord: undefined };
+        count++;
+      }
+    }
+    setOnlineCorrections(updated);
+    setRecords([...records]);
+    setRows([...rows]);
+    const newApproved = rows.filter(isApproved).length;
+    postAnnouncement(`↩️ Undid all ${count} applied Gemini online corrections. Live status: ${newApproved} approved, ${rows.length - newApproved} unapproved.`);
+  };
+
+  // Live Status Counts dynamically updated after each step
+  const totalItemsCount = rows.length;
+  const approvedCount = rows.filter(isApproved).length;
+  const unapprovedCount = totalItemsCount - approvedCount;
+  const approvedPercentage = totalItemsCount > 0 ? Math.round((approvedCount / totalItemsCount) * 100) : 0;
 
   // Step 3 Filtered Rows
   const evaluatedRows = rows.map((r) => ({ row: r, cert: computeRowCertainty(r) }));
@@ -689,6 +941,42 @@ export function App() {
         </div>
       </nav>
 
+      {/* Live Status Bar & Readiness Meter (Real-time counts after each step) */}
+      {rows.length > 0 && (
+        <div style={{ background: '#0f172a', border: '1px solid #334155', borderRadius: 8, padding: '12px 16px', marginBottom: 16 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10, marginBottom: 8 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+              <span style={{ fontWeight: 600, color: '#f8fafc', fontSize: 13 }}>
+                Live Toast Readiness:
+              </span>
+              <span className="status-pill" style={{ background: '#1e293b', border: '1px solid #475569', color: '#cbd5e1', fontSize: 12 }}>
+                📊 Total: <strong>{totalItemsCount}</strong> items
+              </span>
+              <span className="status-pill" style={{ background: '#052e16', border: '1px solid #16a34a', color: '#86efac', fontSize: 12 }}>
+                ✓ Approved: <strong>{approvedCount}</strong> ({approvedPercentage}%)
+              </span>
+              <span className="status-pill" style={{ background: unapprovedCount > 0 ? '#451a03' : '#1e293b', border: unapprovedCount > 0 ? '1px solid #f59e0b' : '1px solid #475569', color: unapprovedCount > 0 ? '#fde68a' : '#94a3b8', fontSize: 12 }}>
+                ⚠️ Unapproved / Needs Action: <strong>{unapprovedCount}</strong>
+              </span>
+            </div>
+            <div style={{ fontSize: 12, color: '#94a3b8' }}>
+              Step {currentStep} of 4: {currentStep === 1 ? 'Upload File' : currentStep === 2 ? 'Autopilot Clean' : currentStep === 3 ? 'Review & Tuning' : 'Toast Export Ready'}
+            </div>
+          </div>
+          {/* Progress bar */}
+          <div style={{ width: '100%', height: 6, background: '#1e293b', borderRadius: 3, overflow: 'hidden' }}>
+            <div
+              style={{
+                width: `${approvedPercentage}%`,
+                height: '100%',
+                background: approvedPercentage === 100 ? '#22c55e' : '#3b82f6',
+                transition: 'width 0.3s ease'
+              }}
+            />
+          </div>
+        </div>
+      )}
+
       {/* Workspace 2-Column Grid */}
       <div className="workspace-layout">
         {/* Left Column: Active Step Stage */}
@@ -785,21 +1073,37 @@ export function App() {
                 </div>
               )}
 
-              {/* Step 1 Success Card */}
+              {/* Step 1 Express Clean & Wizard Navigation */}
               {records.length > 0 && (
-                <div className="toast-panel" style={{ display: 'block', marginTop: 14, borderColor: '#16a34a', background: '#0f291e' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+                <div style={{ marginTop: 16, background: '#172554', border: '2px solid #3b82f6', borderRadius: 10, padding: 18 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 14 }}>
                     <div>
-                      <div style={{ fontWeight: 700, color: '#86efac', fontSize: 15, display: 'flex', alignItems: 'center', gap: 6 }}>
-                        <span>✓ Catalog Ready for Cleaning</span>
+                      <div style={{ fontWeight: 700, color: '#93c5fd', fontSize: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <span>⚡ Express 1-Click Clean &amp; Toast Ready</span>
+                        <span className="app-title-badge">Fastest Path</span>
                       </div>
-                      <div style={{ color: '#cbd5e1', fontSize: 13, marginTop: 4 }}>
-                        Loaded {records.length} items from "{loadedFileName}". Ready for autopilot cleaning.
-                      </div>
+                      <p style={{ color: '#cbd5e1', fontSize: 13, margin: '6px 0 0 0', maxWidth: 560 }}>
+                        Single click runs full packaging normalization (<code>11 oz</code>, <code>1 L</code>), auto-pads barcodes to 13 digits, smart-categorizes items, and opens the validated Toast import file.
+                      </p>
                     </div>
-                    <button type="button" className="btn-toast" onClick={() => setCurrentStep(2)}>
-                      <span>Continue to Smart Clean ➔</span>
-                    </button>
+                    <div className="flex-wrap" style={{ gap: 10 }}>
+                      <button
+                        type="button"
+                        className="btn-toast"
+                        style={{ padding: '12px 20px', fontSize: 15, background: '#16a34a' }}
+                        onClick={handleInstantFullCleanAndExport}
+                      >
+                        <span>🚀 1-Click Clean &amp; Download Toast File</span>
+                      </button>
+                      <button
+                        type="button"
+                        className="btn-outline"
+                        style={{ padding: '10px 16px' }}
+                        onClick={() => setCurrentStep(2)}
+                      >
+                        <span>Step-by-Step Guided Review ➔</span>
+                      </button>
+                    </div>
                   </div>
                 </div>
               )}
@@ -903,6 +1207,24 @@ export function App() {
                   <button type="button" className="btn-toast btn-sm" onClick={handleApproveHighCertainty}>
                     <span>⚡ Auto-Approve High Certainty</span>
                   </button>
+                  <button
+                    type="button"
+                    className="btn-secondary btn-sm"
+                    onClick={handleSmartCategorize}
+                    title="Infer specific categories for missing or generic items using existing category-item mappings in your catalog"
+                  >
+                    <span>🏷️ Smart Categorize</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-toast btn-sm"
+                    style={{ background: '#4338ca' }}
+                    disabled={isScanningOnline}
+                    onClick={handleRunOnlineSearchScan}
+                    title="Scan entire unapproved inventory using Gemini with Google Search to correct naming, brand casing, packaging, and categories"
+                  >
+                    <span>{isScanningOnline ? '⏳ Scanning...' : '🌐 Gemini Online Search & Scan'}</span>
+                  </button>
                   <button type="button" className="btn-secondary btn-sm" onClick={handleApproveAllStep3}>
                     <span>✓ Approve All</span>
                   </button>
@@ -933,6 +1255,24 @@ export function App() {
                   />
                 </div>
               </div>
+
+              {/* Online Search Scan Progress Banner */}
+              {isScanningOnline && scanProgress && (
+                <div style={{ background: '#1e1b4b', border: '1px solid #6366f1', borderRadius: 8, padding: '10px 14px', marginBottom: 14, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <span style={{ fontSize: 16 }}>🌐</span>
+                    <span style={{ fontSize: 13, color: '#e0e7ff', fontWeight: 500 }}>{scanProgress.message}</span>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span className="status-pill" style={{ background: '#312e81', color: '#c7d2fe', fontSize: 11 }}>
+                      {scanProgress.current} / {scanProgress.total} items
+                    </span>
+                    <span className="status-pill" style={{ background: '#4338ca', color: '#fff', fontSize: 11 }}>
+                      {Math.round((scanProgress.current / (scanProgress.total || 1)) * 100)}%
+                    </span>
+                  </div>
+                </div>
+              )}
 
               {/* Interactive Review Table Container */}
               <div className="review-table-container">
@@ -1051,10 +1391,16 @@ export function App() {
                                 type="button"
                                 className="btn-outline btn-sm"
                                 onClick={() => handleRevertRow(row.id)}
+                                title="Revert to original Clover imported values"
                               >
                                 ↩️ Revert
                               </button>
                             </div>
+                            {row.geminiCorrected && (
+                              <div style={{ fontSize: 10, color: '#818cf8', marginTop: 4 }}>
+                                🌐 Online Corrected
+                              </div>
+                            )}
                           </td>
                         </tr>
                       ))
@@ -1276,6 +1622,21 @@ export function App() {
                 <button
                   type="button"
                   className="ai-chip-pill"
+                  style={{ background: '#312e81', color: '#c7d2fe', borderColor: '#4338ca' }}
+                  onClick={handleRunOnlineSearchScan}
+                >
+                  🌐 Scan Unapproved (Online Search)
+                </button>
+                <button
+                  type="button"
+                  className="ai-chip-pill"
+                  onClick={handleSmartCategorize}
+                >
+                  🏷️ Smart Categorize
+                </button>
+                <button
+                  type="button"
+                  className="ai-chip-pill"
                   onClick={() => handleSendAiPrompt('Title-case all brand names across the catalog')}
                 >
                   Title Case Brands
@@ -1457,6 +1818,130 @@ export function App() {
                   <span>⬇️ Confirm &amp; Download File</span>
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Gemini Online Search Corrections Preview Modal */}
+      {onlineCorrectionsModalOpen && onlineCorrections.length > 0 && (
+        <div className="modal-overlay" style={{ display: 'flex' }} role="dialog" aria-modal="true">
+          <div className="modal-box modal-box-large">
+            <div className="modal-header-row">
+              <div>
+                <h2 className="modal-title" style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <span>🌐 Gemini Online Search Corrections</span>
+                  <span className="app-title-badge">Google Grounded</span>
+                </h2>
+                <p className="small text-muted" style={{ margin: '4px 0 0 0' }}>
+                  Scanned unapproved items against real-time retail product data. Preview and apply or undo each correction individually.
+                </p>
+              </div>
+              <button
+                type="button"
+                className="ai-drawer-close"
+                onClick={() => setOnlineCorrectionsModalOpen(false)}
+                aria-label="Close preview"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 14px', background: '#0f172a', border: '1px solid #334155', borderRadius: 8, margin: '12px 0', flexWrap: 'wrap', gap: 10 }}>
+              <div className="flex-wrap" style={{ gap: 8, alignItems: 'center' }}>
+                <span className="status-pill" style={{ background: '#1e293b', border: '1px solid #475569', color: '#cbd5e1' }}>
+                  Total Corrections: <strong>{onlineCorrections.length}</strong>
+                </span>
+                <span className="status-pill" style={{ background: '#052e16', border: '1px solid #16a34a', color: '#86efac' }}>
+                  Applied: <strong>{onlineCorrections.filter((c) => c.applied).length}</strong>
+                </span>
+                <span className="status-pill" style={{ background: '#1e293b', border: '1px solid #475569', color: '#94a3b8' }}>
+                  Pending: <strong>{onlineCorrections.filter((c) => !c.applied).length}</strong>
+                </span>
+              </div>
+              <div className="flex-wrap" style={{ gap: 8 }}>
+                <button
+                  type="button"
+                  className="btn-toast btn-sm"
+                  onClick={handleApplyAllCorrections}
+                >
+                  ✓ Apply All Corrections
+                </button>
+                <button
+                  type="button"
+                  className="btn-outline btn-sm"
+                  onClick={handleUndoAllCorrections}
+                >
+                  ↩️ Undo All Corrections
+                </button>
+              </div>
+            </div>
+
+            <div className="toast-preview-scroll" style={{ maxHeight: 380 }}>
+              <table className="toast-preview-table" style={{ width: '100%', fontSize: 13 }}>
+                <thead>
+                  <tr>
+                    <th style={{ width: 180 }}>Item Name</th>
+                    <th style={{ width: 90 }}>Field</th>
+                    <th style={{ minWidth: 200 }}>Original Value</th>
+                    <th style={{ minWidth: 220 }}>Proposed Correction</th>
+                    <th>Reason / Verification</th>
+                    <th style={{ width: 140, textAlign: 'right' }}>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {onlineCorrections.map((corr, idx) => (
+                    <tr key={idx} style={{ background: corr.applied ? 'rgba(34, 197, 94, 0.08)' : 'transparent' }}>
+                      <td><strong>{corr.itemName}</strong></td>
+                      <td>
+                        <span className="status-pill" style={{ fontSize: 11, padding: '2px 6px' }}>{corr.field}</span>
+                      </td>
+                      <td style={{ color: '#f87171' }}>
+                        <del>{corr.originalValue || '(empty)'}</del>
+                      </td>
+                      <td style={{ color: '#4ade80' }}>
+                        <strong><ins>{corr.proposedValue}</ins></strong>
+                      </td>
+                      <td style={{ fontSize: 12, color: '#cbd5e1' }}>
+                        {corr.reason}
+                      </td>
+                      <td style={{ textAlign: 'right' }}>
+                        {corr.applied ? (
+                          <button
+                            type="button"
+                            className="btn-outline btn-sm"
+                            style={{ borderColor: '#f59e0b', color: '#fde68a' }}
+                            onClick={() => handleUndoSingleCorrection(idx)}
+                          >
+                            ↩️ Undo
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            className="btn-toast btn-sm"
+                            onClick={() => handleApplySingleCorrection(idx)}
+                          >
+                            ✓ Apply
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="modal-actions" style={{ marginTop: 14, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span className="small text-muted">
+                Corrections are synced directly with your working catalog. Live readiness status updates automatically.
+              </span>
+              <button
+                type="button"
+                className="btn-secondary btn-sm"
+                onClick={() => setOnlineCorrectionsModalOpen(false)}
+              >
+                Close Preview
+              </button>
             </div>
           </div>
         </div>

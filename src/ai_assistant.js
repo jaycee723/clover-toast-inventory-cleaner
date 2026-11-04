@@ -172,3 +172,95 @@ export function revertAiChanges(records = [], rows = [], undoSnapshot) {
 
   return reverted;
 }
+
+/**
+ * Applies an individual AI correction to a single item in the dataset.
+ * Returns an undo token specifically for this item.
+ */
+export function applySingleAiChange(records = [], rows = [], change) {
+  if (!change || !change.id) return { success: false, undoRecord: null };
+  const rowIndex = rows.findIndex((r) => r.id === change.id);
+  if (rowIndex === -1) return { success: false, undoRecord: null };
+
+  const row = rows[rowIndex];
+  const rec = records[rowIndex];
+  const field = change.field || 'name';
+  const proposed = change.proposedValue;
+
+  let undoRecord = {
+    id: row.id,
+    index: rowIndex,
+    field,
+    previousDecision: row.decisions[field] || 'pending'
+  };
+
+  if (field === 'name') {
+    undoRecord.previousCurrent = row.current_name;
+    undoRecord.previousProposed = row.proposed_name;
+    undoRecord.previousRec = rec?.name;
+    if (rec) rec.name = proposed;
+    row.current_name = proposed;
+    row.proposed_name = proposed;
+    row.name_source = 'Gemini Online Search';
+    row.decisions.name = 'accept';
+  } else if (field === 'category') {
+    undoRecord.previousCurrent = row.category;
+    undoRecord.previousProposed = row.proposed_category;
+    undoRecord.previousRec = rec?.category;
+    if (rec) rec.category = proposed;
+    row.category = proposed;
+    row.proposed_category = proposed;
+    row.decisions.category = 'accept';
+  } else if (field === 'barcode') {
+    undoRecord.previousRec = rec?.barcode;
+    undoRecord.previousBarcode = row.barcode;
+    if (rec) rec.barcode = proposed;
+    row.barcode = analyzeBarcode(proposed);
+    row.decisions.barcode = 'accept';
+  } else if (field === 'price') {
+    undoRecord.previousRec = rec?.price;
+    undoRecord.previousPrice = row.price;
+    if (rec) rec.price = proposed;
+    row.price = proposed;
+  }
+
+  row.manuallyEdited = true;
+  row.geminiCorrected = true;
+
+  return { success: true, undoRecord };
+}
+
+/**
+ * Reverts an individual AI correction for a specific item.
+ */
+export function revertSingleAiChange(records = [], rows = [], undoRecord) {
+  if (!undoRecord || !undoRecord.id) return false;
+  const rowIndex = rows.findIndex((r) => r.id === undoRecord.id);
+  if (rowIndex === -1) return false;
+
+  const row = rows[rowIndex];
+  const rec = records[rowIndex];
+  const field = undoRecord.field;
+
+  if (field === 'name') {
+    if (rec) rec.name = undoRecord.previousRec;
+    row.current_name = undoRecord.previousCurrent;
+    row.proposed_name = undoRecord.previousProposed;
+    row.decisions.name = undoRecord.previousDecision || 'pending';
+  } else if (field === 'category') {
+    if (rec) rec.category = undoRecord.previousRec;
+    row.category = undoRecord.previousCurrent;
+    row.proposed_category = undoRecord.previousProposed;
+    row.decisions.category = undoRecord.previousDecision || 'pending';
+  } else if (field === 'barcode') {
+    if (rec) rec.barcode = undoRecord.previousRec;
+    row.barcode = undoRecord.previousBarcode;
+    row.decisions.barcode = undoRecord.previousDecision || 'pending';
+  } else if (field === 'price') {
+    if (rec) rec.price = undoRecord.previousRec;
+    row.price = undoRecord.previousPrice;
+  }
+
+  row.geminiCorrected = false;
+  return true;
+}

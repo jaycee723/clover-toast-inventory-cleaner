@@ -9,7 +9,10 @@ import {
   generateBarcodeSvg,
   formatTagPrice,
   paginateAveryLabels,
-  exportAveryCsv
+  exportAveryCsv,
+  generateAveryPdf,
+  saveAveryPdf,
+  getAveryPdfBlobUrl
 } from './avery_labels.js';
 import {
   buildRows,
@@ -192,6 +195,9 @@ export function App() {
   const [averyShowBarcode, setAveryShowBarcode] = useState<boolean>(true);
   const [averyShowStoreName, setAveryShowStoreName] = useState<boolean>(true);
   const [averyStoreName, setAveryStoreName] = useState<string>('777 Liquor Store');
+  const [averyDrawGuides, setAveryDrawGuides] = useState<boolean>(false);
+  const [averyPdfPreviewUrl, setAveryPdfPreviewUrl] = useState<string | null>(null);
+  const [isPdfModalOpen, setIsPdfModalOpen] = useState<boolean>(false);
 
   // Auth & Cloud State
   const [currentUser, setCurrentUser] = useState<any>(null);
@@ -932,7 +938,52 @@ export function App() {
     setIsAveryModalOpen(true);
   };
 
+  const handleSaveAveryPdf = () => {
+    const items = averyItemsToPrint;
+    if (items.length === 0) {
+      setStatusText('No items selected for Avery label PDF export.');
+      return;
+    }
+    const dateStr = new Date().toISOString().slice(0, 10);
+    const filename = `avery_${selectedTemplate.id}_price_tags_${dateStr}.pdf`;
+    saveAveryPdf(
+      items,
+      selectedTemplate,
+      {
+        startPosition: averyStartPosition,
+        copiesPerItem: averyCopies,
+        storeName: averyStoreName,
+        showStoreName: averyShowStoreName,
+        showBarcode: averyShowBarcode,
+        showCategory: true,
+        drawGuides: averyDrawGuides
+      },
+      filename
+    );
+    postAnnouncement(`📄 Generated and downloaded PDF file "${filename}" matching Avery ${selectedTemplate.code} (${items.length} items, ${averyPagination.totalLabels} labels on ${averyPagination.totalPages} sheets)!`);
+  };
+
+  const handleOpenAveryPdf = () => {
+    const items = averyItemsToPrint;
+    if (items.length === 0) {
+      setStatusText('No items selected for Avery label PDF.');
+      return;
+    }
+    const { url } = getAveryPdfBlobUrl(items, selectedTemplate, {
+      startPosition: averyStartPosition,
+      copiesPerItem: averyCopies,
+      storeName: averyStoreName,
+      showStoreName: averyShowStoreName,
+      showBarcode: averyShowBarcode,
+      showCategory: true,
+      drawGuides: averyDrawGuides
+    });
+    setAveryPdfPreviewUrl(url);
+    setIsPdfModalOpen(true);
+  };
+
   const handlePrintAverySheets = () => {
+    handleSaveAveryPdf();
     window.print();
   };
 
@@ -1788,8 +1839,14 @@ export function App() {
                     </p>
                   </div>
                   <div className="flex-wrap" style={{ gap: 8 }}>
-                    <button type="button" className="btn-toast" style={{ background: '#7c3aed' }} onClick={openAveryModal}>
-                      🖨️ Open Avery Label Studio
+                    <button type="button" className="btn-toast" style={{ background: '#7c3aed' }} onClick={handleSaveAveryPdf}>
+                      💾 Save PDF File
+                    </button>
+                    <button type="button" className="btn-outline btn-sm" onClick={handleOpenAveryPdf}>
+                      👁️ Open PDF Preview
+                    </button>
+                    <button type="button" className="btn-secondary btn-sm" onClick={openAveryModal}>
+                      🏷️ Customize Labels
                     </button>
                     <button type="button" className="btn-outline btn-sm" onClick={handleExportAveryCsvFile}>
                       📥 Export Avery CSV
@@ -2295,9 +2352,27 @@ export function App() {
                   type="button"
                   className="btn-toast"
                   style={{ background: '#7c3aed', padding: '8px 16px', fontWeight: 600 }}
-                  onClick={handlePrintAverySheets}
+                  onClick={handleSaveAveryPdf}
+                  title="Generate and download a genuine PDF file matching Avery label dimensions"
                 >
-                  🖨️ Print Sheets / Save as PDF
+                  💾 Save PDF File
+                </button>
+                <button
+                  type="button"
+                  className="btn-toast btn-sm"
+                  style={{ background: '#2563eb' }}
+                  onClick={handleOpenAveryPdf}
+                  title="Open and view the generated PDF in the viewer"
+                >
+                  👁️ Open PDF Preview
+                </button>
+                <button
+                  type="button"
+                  className="btn-outline btn-sm"
+                  onClick={handlePrintAverySheets}
+                  title="Save PDF and open browser print dialog"
+                >
+                  🖨️ Browser Print
                 </button>
                 <button
                   type="button"
@@ -2536,6 +2611,14 @@ export function App() {
                         />
                         <span>Show Store Header on Tag</span>
                       </label>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: '#cbd5e1', cursor: 'pointer' }}>
+                        <input
+                          type="checkbox"
+                          checked={averyDrawGuides}
+                          onChange={(e) => setAveryDrawGuides(e.target.checked)}
+                        />
+                        <span>Draw label alignment borders (faint guides for test prints)</span>
+                      </label>
                     </div>
                   </div>
                 </div>
@@ -2556,9 +2639,27 @@ export function App() {
                       type="button"
                       className="btn-toast btn-sm"
                       style={{ background: '#7c3aed' }}
-                      onClick={handlePrintAverySheets}
+                      onClick={handleSaveAveryPdf}
+                      title="Save and download genuine PDF file"
                     >
-                      🖨️ Print Now
+                      💾 Save PDF
+                    </button>
+                    <button
+                      type="button"
+                      className="btn-toast btn-sm"
+                      style={{ background: '#2563eb' }}
+                      onClick={handleOpenAveryPdf}
+                      title="Open and preview PDF in viewer"
+                    >
+                      👁️ Open PDF
+                    </button>
+                    <button
+                      type="button"
+                      className="btn-outline btn-sm"
+                      onClick={handlePrintAverySheets}
+                      title="Open browser print dialog"
+                    >
+                      🖨️ Print
                     </button>
                   </div>
                 </div>
@@ -2685,6 +2786,58 @@ export function App() {
                   ))
                 )}
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Avery PDF Viewer Modal */}
+      {isPdfModalOpen && averyPdfPreviewUrl && (
+        <div className="avery-modal-overlay" style={{ zIndex: 1100 }} role="dialog" aria-modal="true" aria-labelledby="pdf-viewer-heading">
+          <div className="avery-modal-container" style={{ maxWidth: 1060, height: '90vh' }}>
+            <div className="avery-header">
+              <div className="avery-header-title">
+                <span style={{ fontSize: 24 }}>📄</span>
+                <div>
+                  <h2 id="pdf-viewer-heading">Avery Price Tag PDF — {selectedTemplate.code}</h2>
+                  <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 2 }}>
+                    Exact Avery 8.5" × 11" Letter format • {averyItemsToPrint.length} items ({averyPagination.totalLabels} labels on {averyPagination.totalPages} sheets)
+                  </div>
+                </div>
+              </div>
+              <div className="flex-wrap" style={{ gap: 8 }}>
+                <button
+                  type="button"
+                  className="btn-toast btn-sm"
+                  style={{ background: '#7c3aed' }}
+                  onClick={handleSaveAveryPdf}
+                >
+                  💾 Download / Save PDF
+                </button>
+                <a
+                  href={averyPdfPreviewUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="btn-outline btn-sm"
+                  style={{ textDecoration: 'none', display: 'inline-flex', alignItems: 'center' }}
+                >
+                  🔗 Open in New Window
+                </a>
+                <button
+                  type="button"
+                  className="btn-secondary btn-sm"
+                  onClick={() => setIsPdfModalOpen(false)}
+                >
+                  ✕ Close
+                </button>
+              </div>
+            </div>
+
+            <div style={{ flex: 1, padding: 12, background: '#090d16', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+              <iframe
+                src={averyPdfPreviewUrl}
+                style={{ width: '100%', flex: 1, border: 'none', borderRadius: 8, background: '#ffffff' }}
+                title="Avery Price Tag PDF Preview"
+              />
             </div>
           </div>
         </div>

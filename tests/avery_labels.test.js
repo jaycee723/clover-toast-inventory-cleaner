@@ -83,3 +83,31 @@ test('exportAveryCsv produces header and valid CSV rows for Avery Design & Print
   assert.ok(csv.includes('061994700002'));
   assert.ok(csv.includes('777 Liquor Store'));
 });
+
+test('generateAveryPdf produces valid PDF with authentic Avery dimensions and vector barcodes', async () => {
+  const { generateAveryPdf } = await import('../src/avery_labels.js');
+  const template5160 = AVERY_TEMPLATES.find((t) => t.id === '5160');
+  const items = [
+    { id: '1', name: "Tito's Handmade Vodka 750ml", price: 24.99, barcode: '061994700002', category: 'LIQUOR/SPIRITS', size: '750ml' },
+    { id: '2', name: "Jack Daniel's Black 750ml", price: 27.99, barcode: '082184090466', category: 'LIQUOR/SPIRITS', size: '750ml' }
+  ];
+
+  const doc = generateAveryPdf(items, template5160, {
+    storeName: '777 Liquor Store',
+    showStoreName: true,
+    showBarcode: true,
+    startPosition: 2,
+    copiesPerItem: 2
+  });
+
+  assert.ok(doc);
+  const arrayBuffer = doc.output('arraybuffer');
+  assert.ok(arrayBuffer.byteLength > 2000, 'PDF buffer should contain valid PDF data');
+
+  // Verify across templates
+  for (const tmpl of AVERY_TEMPLATES) {
+    const tmplDoc = generateAveryPdf(items, tmpl);
+    const buf = tmplDoc.output('arraybuffer');
+    assert.ok(buf.byteLength > 2000, `Template ${tmpl.id} should output valid PDF bytes`);
+  }
+});

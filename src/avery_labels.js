@@ -1,3 +1,5 @@
+import { jsPDF } from 'jspdf';
+
 /**
  * Avery Label Sheet Templates, Barcode Rendering, and Label Generator
  * Supports printing price tags and shelf labels for retail items.
@@ -367,3 +369,384 @@ export function exportAveryCsv(items, storeName = '777 Liquor Store') {
 
   return [headers.join(','), ...rows.map((r) => r.join(','))].join('\r\n');
 }
+
+/**
+ * Draws crisp, resolution-independent vector barcode rectangles into a jsPDF document.
+ * Code128 standard supported natively by all retail POS laser/imager scanners.
+ * @param {jsPDF} doc
+ * @param {string} barcodeDigits
+ * @param {number} x
+ * @param {number} y
+ * @param {number} width
+ * @param {number} height
+ */
+export function drawVectorBarcode(doc, barcodeDigits, x, y, width, height) {
+  const clean = String(barcodeDigits || '').trim();
+  if (!clean) return;
+
+  const widths = encodeCode128B(clean);
+  if (!widths || !widths.length) return;
+
+  const totalUnits = widths.reduce((a, b) => a + b, 0);
+  if (!totalUnits) return;
+
+  const unitWidth = width / totalUnits;
+  let currentX = x;
+
+  doc.setFillColor(0, 0, 0);
+  for (let i = 0; i < widths.length; i++) {
+    const barW = widths[i] * unitWidth;
+    if (i % 2 === 0) {
+      doc.rect(currentX, y, barW, height, 'F');
+    }
+    currentX += barW;
+  }
+}
+
+/**
+ * Renders a single retail price tag / shelf label into an exact Avery slot on the PDF.
+ * @param {jsPDF} doc
+ * @param {PriceTagItem} item
+ * @param {number} x
+ * @param {number} y
+ * @param {number} width
+ * @param {number} height
+ * @param {AveryTemplate} template
+ * @param {Object} options
+ */
+export function renderSingleAveryLabel(doc, item, x, y, width, height, template, options = {}) {
+  const {
+    storeName = '777 Liquor Store',
+    showStoreName = true,
+    showBarcode = true,
+    showCategory = true
+  } = options;
+
+  if (template.id === '5167') {
+    // Mini Price Sticker (0.5" x 1.75")
+    const padX = 0.04;
+    const padY = 0.03;
+    const innerW = width - padX * 2;
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(6.5);
+    doc.setTextColor(0, 0, 0);
+    const titleLines = doc.splitTextToSize(item.name || '', innerW);
+    doc.text(titleLines[0] || '', x + padX, y + padY + 0.08);
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8.5);
+    doc.setTextColor(0, 0, 0);
+    doc.text(formatTagPrice(item.price), x + padX, y + height - padY - 0.02);
+
+    if (showBarcode && item.barcode) {
+      const barcodeW = 0.95;
+      const barcodeH = 0.14;
+      const bx = x + width - padX - barcodeW;
+      const by = y + padY + 0.12;
+      drawVectorBarcode(doc, item.barcode, bx, by, barcodeW, barcodeH);
+
+      doc.setFont('courier', 'normal');
+      doc.setFontSize(4.5);
+      doc.setTextColor(30, 41, 59);
+      doc.text(item.barcode, bx + barcodeW / 2, by + barcodeH + 0.06, { align: 'center' });
+    }
+    return;
+  }
+
+  if (template.id === '5163') {
+    // Large Shelf & Bin Tag (2.0" x 4.0")
+    const padX = 0.14;
+    const padY = 0.12;
+    const innerW = width - padX * 2;
+
+    if (showStoreName) {
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(8.5);
+      doc.setTextColor(100, 116, 139);
+      doc.text(String(storeName || '777 LIQUOR STORE').toUpperCase(), x + padX, y + padY + 0.10);
+    }
+    if (showCategory && item.category) {
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(8);
+      doc.setTextColor(100, 116, 139);
+      doc.text(String(item.category).toUpperCase().slice(0, 24), x + width - padX, y + padY + 0.10, { align: 'right' });
+    }
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(12);
+    doc.setTextColor(0, 0, 0);
+    const titleLines = doc.splitTextToSize(item.name || '', innerW).slice(0, 3);
+    doc.text(titleLines, x + padX, y + padY + 0.32);
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(22);
+    doc.setTextColor(0, 0, 0);
+    doc.text(formatTagPrice(item.price), x + padX, y + height - padY - 0.24);
+
+    if (item.size) {
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(9);
+      doc.setTextColor(71, 85, 105);
+      doc.text(item.size, x + padX, y + height - padY - 0.08);
+    }
+
+    if (showBarcode && item.barcode) {
+      const barcodeW = 2.0;
+      const barcodeH = 0.45;
+      const bx = x + width - padX - barcodeW;
+      const by = y + height - padY - barcodeH - 0.10;
+      drawVectorBarcode(doc, item.barcode, bx, by, barcodeW, barcodeH);
+
+      doc.setFont('courier', 'bold');
+      doc.setFontSize(8);
+      doc.setTextColor(15, 23, 42);
+      doc.text(item.barcode, bx + barcodeW / 2, by + barcodeH + 0.09, { align: 'center' });
+    }
+    return;
+  }
+
+  if (template.id === '5161') {
+    // Shelf Talker (1.0" x 4.0")
+    const padX = 0.10;
+    const padY = 0.06;
+    const innerW = width - padX * 2;
+    const topY = y + padY + 0.07;
+
+    if (showStoreName) {
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(7);
+      doc.setTextColor(100, 116, 139);
+      doc.text(String(storeName || '777 LIQUOR STORE').toUpperCase().slice(0, 28), x + padX, topY);
+    }
+    if (showCategory && item.category) {
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(6.5);
+      doc.setTextColor(100, 116, 139);
+      doc.text(String(item.category).toUpperCase().slice(0, 22), x + width - padX, topY, { align: 'right' });
+    }
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8.5);
+    doc.setTextColor(0, 0, 0);
+    const titleLines = doc.splitTextToSize(item.name || '', innerW).slice(0, 2);
+    doc.text(titleLines, x + padX, topY + 0.13);
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(14);
+    doc.setTextColor(0, 0, 0);
+    doc.text(formatTagPrice(item.price), x + padX, y + height - padY - 0.13);
+
+    if (item.size) {
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(6.5);
+      doc.setTextColor(71, 85, 105);
+      doc.text(item.size, x + padX, y + height - padY - 0.02);
+    }
+
+    if (showBarcode && item.barcode) {
+      const barcodeW = 1.70;
+      const barcodeH = 0.22;
+      const bx = x + width - padX - barcodeW;
+      const by = y + height - padY - barcodeH - 0.08;
+      drawVectorBarcode(doc, item.barcode, bx, by, barcodeW, barcodeH);
+
+      doc.setFont('courier', 'normal');
+      doc.setFontSize(6);
+      doc.setTextColor(15, 23, 42);
+      doc.text(item.barcode, bx + barcodeW / 2, by + barcodeH + 0.07, { align: 'center' });
+    }
+    return;
+  }
+
+  if (template.id === '94220') {
+    // Square Tag (1.5" x 1.5")
+    const padX = 0.07;
+    const padY = 0.07;
+    const innerW = width - padX * 2;
+
+    if (showStoreName) {
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(6);
+      doc.setTextColor(100, 116, 139);
+      doc.text(String(storeName || '777 LIQUOR STORE').toUpperCase().slice(0, 18), x + width / 2, y + padY + 0.06, { align: 'center' });
+    }
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(7.5);
+    doc.setTextColor(0, 0, 0);
+    const titleLines = doc.splitTextToSize(item.name || '', innerW).slice(0, 2);
+    doc.text(titleLines, x + width / 2, y + padY + 0.22, { align: 'center' });
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(13);
+    doc.setTextColor(0, 0, 0);
+    doc.text(formatTagPrice(item.price), x + width / 2, y + padY + 0.55, { align: 'center' });
+
+    if (showBarcode && item.barcode) {
+      const barcodeW = 1.20;
+      const barcodeH = 0.26;
+      const bx = x + (width - barcodeW) / 2;
+      const by = y + height - padY - barcodeH - 0.08;
+      drawVectorBarcode(doc, item.barcode, bx, by, barcodeW, barcodeH);
+
+      doc.setFont('courier', 'normal');
+      doc.setFontSize(5.5);
+      doc.setTextColor(15, 23, 42);
+      doc.text(item.barcode, bx + barcodeW / 2, by + barcodeH + 0.07, { align: 'center' });
+    }
+    return;
+  }
+
+  // Standard Avery 5160 / 8160 (1.0" x 2.625")
+  const padX = 0.08;
+  const padY = 0.06;
+  const innerW = width - padX * 2;
+  const topY = y + padY + 0.07;
+
+  if (showStoreName) {
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(6.5);
+    doc.setTextColor(100, 116, 139);
+    doc.text(String(storeName || '777 LIQUOR STORE').toUpperCase().slice(0, 20), x + padX, topY);
+  }
+  if (showCategory && item.category) {
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(6);
+    doc.setTextColor(100, 116, 139);
+    doc.text(String(item.category).toUpperCase().slice(0, 16), x + width - padX, topY, { align: 'right' });
+  }
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8.2);
+  doc.setTextColor(0, 0, 0);
+  const titleLines = doc.splitTextToSize(item.name || '', innerW).slice(0, 2);
+  doc.text(titleLines, x + padX, topY + 0.12);
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(13);
+  doc.setTextColor(0, 0, 0);
+  doc.text(formatTagPrice(item.price), x + padX, y + height - padY - 0.14);
+
+  if (item.size) {
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(6);
+    doc.setTextColor(71, 85, 105);
+    doc.text(item.size, x + padX, y + height - padY - 0.02);
+  }
+
+  if (showBarcode && item.barcode) {
+    const barcodeW = 1.30;
+    const barcodeH = 0.22;
+    const bx = x + width - padX - barcodeW;
+    const by = y + height - padY - barcodeH - 0.08;
+    drawVectorBarcode(doc, item.barcode, bx, by, barcodeW, barcodeH);
+
+    doc.setFont('courier', 'normal');
+    doc.setFontSize(5.5);
+    doc.setTextColor(15, 23, 42);
+    doc.text(item.barcode, bx + barcodeW / 2, by + barcodeH + 0.07, { align: 'center' });
+  }
+}
+
+/**
+ * Generates an authentic jsPDF Document instance adhering to exact Avery label sizing and placement.
+ * @param {PriceTagItem[]} items
+ * @param {AveryTemplate} template
+ * @param {Object} [options]
+ * @param {number} [options.startPosition=1]
+ * @param {number} [options.copiesPerItem=1]
+ * @param {string} [options.storeName='777 Liquor Store']
+ * @param {boolean} [options.showStoreName=true]
+ * @param {boolean} [options.showBarcode=true]
+ * @param {boolean} [options.showCategory=true]
+ * @param {boolean} [options.drawGuides=false]
+ * @returns {jsPDF}
+ */
+export function generateAveryPdf(items, template, options = {}) {
+  const {
+    startPosition = 1,
+    copiesPerItem = 1,
+    storeName = '777 Liquor Store',
+    showStoreName = true,
+    showBarcode = true,
+    showCategory = true,
+    drawGuides = false
+  } = options;
+
+  const doc = new jsPDF({
+    orientation: 'portrait',
+    unit: 'in',
+    format: 'letter'
+  });
+
+  const { pages } = paginateAveryLabels(items, template, startPosition, copiesPerItem);
+
+  if (!pages.length) {
+    return doc;
+  }
+
+  pages.forEach((pageItems, pageIndex) => {
+    if (pageIndex > 0) {
+      doc.addPage('letter', 'portrait');
+    }
+
+    pageItems.forEach((item, slotIndex) => {
+      const col = slotIndex % template.columns;
+      const row = Math.floor(slotIndex / template.columns);
+      const x = template.leftMarginIn + col * (template.labelWidthIn + template.colGapIn);
+      const y = template.topMarginIn + row * (template.labelHeightIn + template.rowGapIn);
+      const width = template.labelWidthIn;
+      const height = template.labelHeightIn;
+
+      if (drawGuides) {
+        doc.setDrawColor(226, 232, 240);
+        doc.setLineWidth(0.005);
+        doc.rect(x, y, width, height, 'S');
+      }
+
+      if (!item) {
+        return;
+      }
+
+      renderSingleAveryLabel(doc, item, x, y, width, height, template, {
+        storeName,
+        showStoreName,
+        showBarcode,
+        showCategory
+      });
+    });
+  });
+
+  return doc;
+}
+
+/**
+ * Generates and downloads the PDF file adhering strictly to Avery label dimensions and placement.
+ * @param {PriceTagItem[]} items
+ * @param {AveryTemplate} template
+ * @param {Object} [options]
+ * @param {string} [filename]
+ * @returns {string}
+ */
+export function saveAveryPdf(items, template, options = {}, filename) {
+  const doc = generateAveryPdf(items, template, options);
+  const finalName = filename || `avery_${template.id}_price_tags_${new Date().toISOString().slice(0, 10)}.pdf`;
+  doc.save(finalName);
+  return finalName;
+}
+
+/**
+ * Generates an application/pdf Blob and object URL for in-app viewing or opening.
+ * @param {PriceTagItem[]} items
+ * @param {AveryTemplate} template
+ * @param {Object} [options]
+ * @returns {{ blob: Blob, url: string }}
+ */
+export function getAveryPdfBlobUrl(items, template, options = {}) {
+  const doc = generateAveryPdf(items, template, options);
+  const blob = doc.output('blob');
+  const url = URL.createObjectURL(blob);
+  return { blob, url };
+}
+

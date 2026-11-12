@@ -46,6 +46,20 @@
           "description": "Session title",
           "maxLength": 128
         },
+        "fileName": {
+          "type": "string",
+          "description": "Original file name of imported inventory",
+          "maxLength": 128
+        },
+        "recordsJson": {
+          "type": "string",
+          "description": "Serialized raw inventory records data",
+          "maxLength": 750000
+        },
+        "currentStep": {
+          "type": "number",
+          "description": "Wizard step when session was saved"
+        },
         "decisionsJson": {
           "type": "string",
           "description": "Serialized review decisions state",
@@ -80,6 +94,134 @@
         "createdAt",
         "updatedAt"
       ]
+    },
+    "brandLogo": {
+      "title": "BrandLogo",
+      "description": "Hosted brand logo image and metadata for label printing",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Logo ID",
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "maxLength": 128
+        },
+        "userId": {
+          "type": "string",
+          "description": "Owner user UID",
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "maxLength": 128
+        },
+        "brandName": {
+          "type": "string",
+          "description": "Display name of brand",
+          "maxLength": 128
+        },
+        "brandKey": {
+          "type": "string",
+          "description": "Normalized brand slug",
+          "maxLength": 128
+        },
+        "imageDataUrl": {
+          "type": "string",
+          "description": "Compressed base64 data URL of the brand logo",
+          "maxLength": 350000
+        },
+        "width": {
+          "type": "number",
+          "description": "Image width in pixels"
+        },
+        "height": {
+          "type": "number",
+          "description": "Image height in pixels"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Creation timestamp"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Last update timestamp"
+        }
+      },
+      "required": ["id", "userId", "brandName", "brandKey", "imageDataUrl", "createdAt", "updatedAt"]
+    },
+    "masterItem": {
+      "title": "MasterInventoryItem",
+      "description": "Individual inventory item stored in master catalog",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Item ID or normalized barcode",
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "maxLength": 128
+        },
+        "userId": {
+          "type": "string",
+          "description": "Owner user UID",
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "maxLength": 128
+        },
+        "barcode": {
+          "type": "string",
+          "description": "UPC or EAN barcode",
+          "maxLength": 64
+        },
+        "name": {
+          "type": "string",
+          "description": "Item title",
+          "maxLength": 256
+        },
+        "category": {
+          "type": "string",
+          "description": "Item category",
+          "maxLength": 128
+        },
+        "price": {
+          "type": "string",
+          "description": "Protected retail price",
+          "maxLength": 32
+        },
+        "size": {
+          "type": "string",
+          "description": "Container size or pack volume",
+          "maxLength": 64
+        },
+        "brand": {
+          "type": "string",
+          "description": "Brand name",
+          "maxLength": 128
+        },
+        "sku": {
+          "type": "string",
+          "description": "Stock keeping unit",
+          "maxLength": 64
+        },
+        "notes": {
+          "type": "string",
+          "description": "Optional notes",
+          "maxLength": 512
+        },
+        "source": {
+          "type": "string",
+          "description": "Origin of item (import/manual)",
+          "maxLength": 64
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Creation timestamp"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Last update timestamp"
+        }
+      },
+      "required": ["id", "userId", "barcode", "name", "category", "price", "createdAt", "updatedAt"]
     }
   },
   "firestore": {
@@ -94,6 +236,18 @@
         "$ref": "#/entities/session"
       },
       "description": "User inventory review sessions storage"
+    },
+    "/users/{userId}/brandLogos/{logoId}": {
+      "schema": {
+        "$ref": "#/entities/brandLogo"
+      },
+      "description": "Hosted brand logos for label printing"
+    },
+    "/users/{userId}/masterItems/{itemId}": {
+      "schema": {
+        "$ref": "#/entities/masterItem"
+      },
+      "description": "Master store inventory catalog items"
     }
   }
 }

@@ -1,9 +1,43 @@
 import { jsPDF } from 'jspdf';
+import { findLogoForProduct } from './brand_logos.js';
 
 /**
  * Avery Label Sheet Templates, Barcode Rendering, and Label Generator
  * Supports printing price tags and shelf labels for retail items.
  */
+
+export const DEFAULT_AVERY_THEME = {
+  priceFontSize: 13,
+  titleFontSize: 8.2,
+  storeFontSize: 6.5,
+  sizeFontSize: 6,
+  priceColor: '#000000',
+  titleColor: '#000000',
+  storeColor: '#64748b',
+  tagBgColor: '#ffffff',
+  borderColor: '#e2e8f0',
+  borderStyle: 'hairline', // 'none' | 'hairline' | 'dashed' | 'solid-bold'
+  borderRadius: 2,
+  paddingInches: 0.06,
+  logoPlacement: 'top-right', // 'top-right' | 'top-left' | 'center-top' | 'beside-price'
+  logoScale: 'medium', // 'small' | 'medium' | 'large'
+  showBrandLogos: true,
+  showBarcode: true,
+  showStoreName: true,
+  showCategory: true,
+  storeName: '777 Liquor Store'
+};
+
+export function hexToRgb(hex) {
+  if (!hex || typeof hex !== 'string') return [0, 0, 0];
+  let clean = hex.replace('#', '').trim();
+  if (clean.length === 3) {
+    clean = clean.split('').map((c) => c + c).join('');
+  }
+  const num = parseInt(clean, 16);
+  if (isNaN(num)) return [0, 0, 0];
+  return [(num >> 16) & 255, (num >> 8) & 255, num & 255];
+}
 
 /**
  * @typedef {Object} AveryTemplate
@@ -19,8 +53,8 @@ import { jsPDF } from 'jspdf';
  * @property {number} leftMarginIn
  * @property {number} colGapIn
  * @property {number} rowGapIn
- * @property {number} sheetWidthIn
- * @property {number} sheetHeightIn
+ * @property {sheetWidthIn} sheetWidthIn
+ * @property {sheetHeightIn} sheetHeightIn
  * @property {string} description
  * @property {string} recommendedUse
  */
@@ -404,6 +438,44 @@ export function drawVectorBarcode(doc, barcodeDigits, x, y, width, height) {
 }
 
 /**
+ * Helper to embed an aspect-ratio-preserved brand logo into the PDF label slot.
+ */
+function embedPdfBrandLogo(doc, logo, slotX, slotY, slotW, slotH, placement = 'top-right', scale = 'medium') {
+  if (!logo || !logo.imageDataUrl) return null;
+  const maxDim = scale === 'small' ? 0.22 : scale === 'large' ? 0.48 : 0.34;
+  const aspect = (logo.width && logo.height) ? (logo.width / logo.height) : 1;
+  let imgW = maxDim;
+  let imgH = maxDim;
+  if (aspect >= 1) {
+    imgH = maxDim / aspect;
+  } else {
+    imgW = maxDim * aspect;
+  }
+
+  let lx = slotX + slotW - imgW - 0.05;
+  let ly = slotY + 0.04;
+
+  if (placement === 'top-left') {
+    lx = slotX + 0.05;
+    ly = slotY + 0.04;
+  } else if (placement === 'center-top') {
+    lx = slotX + (slotW - imgW) / 2;
+    ly = slotY + 0.04;
+  } else if (placement === 'beside-price') {
+    lx = slotX + slotW - imgW - 0.05;
+    ly = slotY + slotH - imgH - 0.06;
+  }
+
+  try {
+    doc.addImage(logo.imageDataUrl, 'PNG', lx, ly, imgW, imgH);
+    return { lx, ly, imgW, imgH, placement };
+  } catch (err) {
+    console.warn('Could not embed brand logo into PDF:', err);
+    return null;
+  }
+}
+
+/**
  * Renders a single retail price tag / shelf label into an exact Avery slot on the PDF.
  * @param {jsPDF} doc
  * @param {PriceTagItem} item
@@ -415,28 +487,59 @@ export function drawVectorBarcode(doc, barcodeDigits, x, y, width, height) {
  * @param {Object} options
  */
 export function renderSingleAveryLabel(doc, item, x, y, width, height, template, options = {}) {
-  const {
-    storeName = '777 Liquor Store',
-    showStoreName = true,
-    showBarcode = true,
-    showCategory = true
-  } = options;
+  const theme = { ...DEFAULT_AVERY_THEME, ...(options.theme || {}) };
+  const storeName = options.storeName || theme.storeName || '777 Liquor Store';
+  const showStoreName = options.showStoreName !== undefined ? options.showStoreName : theme.showStoreName;
+  const showBarcode = options.showBarcode !== undefined ? options.showBarcode : theme.showBarcode;
+  const showCategory = options.showCategory !== undefined ? options.showCategory : theme.showCategory;
+  const brandLogos = options.brandLogos || [];
 
+  // 1. Tag Background
+  if (theme.tagBgColor && theme.tagBgColor.toLowerCase() !== '#ffffff') {
+    doc.setFillColor(...hexToRgb(theme.tagBgColor));
+    doc.rect(x, y, width, height, 'F');
+  }
+
+  // 2. Tag Border
+  if (theme.borderStyle && theme.borderStyle !== 'none') {
+    doc.setDrawColor(...hexToRgb(theme.borderColor));
+    if (theme.borderStyle === 'dashed') {
+      doc.setLineDashPattern([0.02, 0.02], 0);
+      doc.setLineWidth(0.006);
+    } else if (theme.borderStyle === 'solid-bold') {
+      doc.setLineDashPattern([], 0);
+      doc.setLineWidth(0.012);
+    } else {
+      doc.setLineDashPattern([], 0);
+      doc.setLineWidth(0.005);
+    }
+    if (theme.borderRadius > 0) {
+      doc.roundedRect(x, y, width, height, 0.03, 0.03, 'S');
+    } else {
+      doc.rect(x, y, width, height, 'S');
+    }
+    doc.setLineDashPattern([], 0);
+  }
+
+  // 3. Find matched brand logo
+  const logo = theme.showBrandLogos ? findLogoForProduct(item, brandLogos) : null;
+  let embeddedLogo = null;
+
+  const padX = theme.paddingInches || 0.07;
+  const padY = (theme.paddingInches ? theme.paddingInches * 0.8 : 0.05);
+  const innerW = width - padX * 2;
+
+  // Mini Price Sticker (0.5" x 1.75")
   if (template.id === '5167') {
-    // Mini Price Sticker (0.5" x 1.75")
-    const padX = 0.04;
-    const padY = 0.03;
-    const innerW = width - padX * 2;
-
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(6.5);
-    doc.setTextColor(0, 0, 0);
+    doc.setFontSize(theme.titleFontSize ? Math.min(theme.titleFontSize, 7) : 6.5);
+    doc.setTextColor(...hexToRgb(theme.titleColor));
     const titleLines = doc.splitTextToSize(item.name || '', innerW);
     doc.text(titleLines[0] || '', x + padX, y + padY + 0.08);
 
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(8.5);
-    doc.setTextColor(0, 0, 0);
+    doc.setFontSize(theme.priceFontSize ? Math.min(theme.priceFontSize, 10) : 8.5);
+    doc.setTextColor(...hexToRgb(theme.priceColor));
     doc.text(formatTagPrice(item.price), x + padX, y + height - padY - 0.02);
 
     if (showBarcode && item.barcode) {
@@ -454,48 +557,49 @@ export function renderSingleAveryLabel(doc, item, x, y, width, height, template,
     return;
   }
 
+  // Large Shelf & Bin Tag (2.0" x 4.0")
   if (template.id === '5163') {
-    // Large Shelf & Bin Tag (2.0" x 4.0")
-    const padX = 0.14;
-    const padY = 0.12;
-    const innerW = width - padX * 2;
+    if (logo) {
+      embeddedLogo = embedPdfBrandLogo(doc, logo, x, y, width, height, theme.logoPlacement, theme.logoScale || 'large');
+    }
 
     if (showStoreName) {
       doc.setFont('helvetica', 'bold');
-      doc.setFontSize(8.5);
-      doc.setTextColor(100, 116, 139);
+      doc.setFontSize(theme.storeFontSize ? theme.storeFontSize * 1.2 : 8.5);
+      doc.setTextColor(...hexToRgb(theme.storeColor));
       doc.text(String(storeName || '777 LIQUOR STORE').toUpperCase(), x + padX, y + padY + 0.10);
     }
     if (showCategory && item.category) {
       doc.setFont('helvetica', 'bold');
-      doc.setFontSize(8);
-      doc.setTextColor(100, 116, 139);
-      doc.text(String(item.category).toUpperCase().slice(0, 24), x + width - padX, y + padY + 0.10, { align: 'right' });
+      doc.setFontSize(theme.sizeFontSize ? theme.sizeFontSize * 1.1 : 8);
+      doc.setTextColor(...hexToRgb(theme.storeColor));
+      const rightX = (embeddedLogo && theme.logoPlacement === 'top-right') ? x + width - padX - embeddedLogo.imgW - 0.08 : x + width - padX;
+      doc.text(String(item.category).toUpperCase().slice(0, 22), rightX, y + padY + 0.10, { align: 'right' });
     }
 
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(12);
-    doc.setTextColor(0, 0, 0);
+    doc.setFontSize(theme.titleFontSize ? theme.titleFontSize * 1.3 : 12);
+    doc.setTextColor(...hexToRgb(theme.titleColor));
     const titleLines = doc.splitTextToSize(item.name || '', innerW).slice(0, 3);
     doc.text(titleLines, x + padX, y + padY + 0.32);
 
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(22);
-    doc.setTextColor(0, 0, 0);
+    doc.setFontSize(theme.priceFontSize ? theme.priceFontSize * 1.5 : 22);
+    doc.setTextColor(...hexToRgb(theme.priceColor));
     doc.text(formatTagPrice(item.price), x + padX, y + height - padY - 0.24);
 
     if (item.size) {
       doc.setFont('helvetica', 'bold');
-      doc.setFontSize(9);
+      doc.setFontSize(theme.sizeFontSize ? theme.sizeFontSize * 1.2 : 9);
       doc.setTextColor(71, 85, 105);
-      doc.text(item.size, x + padX, y + height - padY - 0.08);
+      doc.text(item.size, x + padX, y + height - padY - 0.06);
     }
 
     if (showBarcode && item.barcode) {
-      const barcodeW = 2.0;
-      const barcodeH = 0.45;
+      const barcodeW = 1.90;
+      const barcodeH = 0.38;
       const bx = x + width - padX - barcodeW;
-      const by = y + height - padY - barcodeH - 0.10;
+      const by = y + height - padY - barcodeH - 0.12;
       drawVectorBarcode(doc, item.barcode, bx, by, barcodeW, barcodeH);
 
       doc.setFont('courier', 'bold');
@@ -506,40 +610,41 @@ export function renderSingleAveryLabel(doc, item, x, y, width, height, template,
     return;
   }
 
+  // Shelf Talker (1.0" x 4.0")
   if (template.id === '5161') {
-    // Shelf Talker (1.0" x 4.0")
-    const padX = 0.10;
-    const padY = 0.06;
-    const innerW = width - padX * 2;
-    const topY = y + padY + 0.07;
+    if (logo) {
+      embeddedLogo = embedPdfBrandLogo(doc, logo, x, y, width, height, theme.logoPlacement, theme.logoScale);
+    }
 
+    const topY = y + padY + 0.07;
     if (showStoreName) {
       doc.setFont('helvetica', 'bold');
-      doc.setFontSize(7);
-      doc.setTextColor(100, 116, 139);
-      doc.text(String(storeName || '777 LIQUOR STORE').toUpperCase().slice(0, 28), x + padX, topY);
+      doc.setFontSize(theme.storeFontSize || 7);
+      doc.setTextColor(...hexToRgb(theme.storeColor));
+      doc.text(String(storeName || '777 LIQUOR STORE').toUpperCase().slice(0, 26), x + padX, topY);
     }
     if (showCategory && item.category) {
       doc.setFont('helvetica', 'bold');
-      doc.setFontSize(6.5);
-      doc.setTextColor(100, 116, 139);
-      doc.text(String(item.category).toUpperCase().slice(0, 22), x + width - padX, topY, { align: 'right' });
+      doc.setFontSize(theme.sizeFontSize || 6.5);
+      doc.setTextColor(...hexToRgb(theme.storeColor));
+      const rightX = (embeddedLogo && theme.logoPlacement === 'top-right') ? x + width - padX - embeddedLogo.imgW - 0.05 : x + width - padX;
+      doc.text(String(item.category).toUpperCase().slice(0, 20), rightX, topY, { align: 'right' });
     }
 
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(8.5);
-    doc.setTextColor(0, 0, 0);
+    doc.setFontSize(theme.titleFontSize || 8.5);
+    doc.setTextColor(...hexToRgb(theme.titleColor));
     const titleLines = doc.splitTextToSize(item.name || '', innerW).slice(0, 2);
     doc.text(titleLines, x + padX, topY + 0.13);
 
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(14);
-    doc.setTextColor(0, 0, 0);
+    doc.setFontSize(theme.priceFontSize || 14);
+    doc.setTextColor(...hexToRgb(theme.priceColor));
     doc.text(formatTagPrice(item.price), x + padX, y + height - padY - 0.13);
 
     if (item.size) {
       doc.setFont('helvetica', 'bold');
-      doc.setFontSize(6.5);
+      doc.setFontSize(theme.sizeFontSize || 6.5);
       doc.setTextColor(71, 85, 105);
       doc.text(item.size, x + padX, y + height - padY - 0.02);
     }
@@ -559,28 +664,28 @@ export function renderSingleAveryLabel(doc, item, x, y, width, height, template,
     return;
   }
 
+  // Square Tag (1.5" x 1.5")
   if (template.id === '94220') {
-    // Square Tag (1.5" x 1.5")
-    const padX = 0.07;
-    const padY = 0.07;
-    const innerW = width - padX * 2;
+    if (logo) {
+      embeddedLogo = embedPdfBrandLogo(doc, logo, x, y, width, height, theme.logoPlacement, 'small');
+    }
 
     if (showStoreName) {
       doc.setFont('helvetica', 'bold');
-      doc.setFontSize(6);
-      doc.setTextColor(100, 116, 139);
+      doc.setFontSize(theme.storeFontSize ? theme.storeFontSize * 0.9 : 6);
+      doc.setTextColor(...hexToRgb(theme.storeColor));
       doc.text(String(storeName || '777 LIQUOR STORE').toUpperCase().slice(0, 18), x + width / 2, y + padY + 0.06, { align: 'center' });
     }
 
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(7.5);
-    doc.setTextColor(0, 0, 0);
+    doc.setFontSize(theme.titleFontSize ? theme.titleFontSize * 0.9 : 7.5);
+    doc.setTextColor(...hexToRgb(theme.titleColor));
     const titleLines = doc.splitTextToSize(item.name || '', innerW).slice(0, 2);
     doc.text(titleLines, x + width / 2, y + padY + 0.22, { align: 'center' });
 
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(13);
-    doc.setTextColor(0, 0, 0);
+    doc.setFontSize(theme.priceFontSize || 13);
+    doc.setTextColor(...hexToRgb(theme.priceColor));
     doc.text(formatTagPrice(item.price), x + width / 2, y + padY + 0.55, { align: 'center' });
 
     if (showBarcode && item.barcode) {
@@ -599,38 +704,41 @@ export function renderSingleAveryLabel(doc, item, x, y, width, height, template,
   }
 
   // Standard Avery 5160 / 8160 (1.0" x 2.625")
-  const padX = 0.08;
-  const padY = 0.06;
-  const innerW = width - padX * 2;
+  if (logo) {
+    embeddedLogo = embedPdfBrandLogo(doc, logo, x, y, width, height, theme.logoPlacement, theme.logoScale);
+  }
+
   const topY = y + padY + 0.07;
 
   if (showStoreName) {
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(6.5);
-    doc.setTextColor(100, 116, 139);
+    doc.setFontSize(theme.storeFontSize || 6.5);
+    doc.setTextColor(...hexToRgb(theme.storeColor));
     doc.text(String(storeName || '777 LIQUOR STORE').toUpperCase().slice(0, 20), x + padX, topY);
   }
   if (showCategory && item.category) {
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(6);
-    doc.setTextColor(100, 116, 139);
-    doc.text(String(item.category).toUpperCase().slice(0, 16), x + width - padX, topY, { align: 'right' });
+    doc.setFontSize(theme.sizeFontSize || 6);
+    doc.setTextColor(...hexToRgb(theme.storeColor));
+    const rightX = (embeddedLogo && theme.logoPlacement === 'top-right') ? x + width - padX - embeddedLogo.imgW - 0.04 : x + width - padX;
+    doc.text(String(item.category).toUpperCase().slice(0, 16), rightX, topY, { align: 'right' });
   }
 
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(8.2);
-  doc.setTextColor(0, 0, 0);
-  const titleLines = doc.splitTextToSize(item.name || '', innerW).slice(0, 2);
+  doc.setFontSize(theme.titleFontSize || 8.2);
+  doc.setTextColor(...hexToRgb(theme.titleColor));
+  const availableTitleW = (embeddedLogo && theme.logoPlacement === 'top-right') ? innerW - embeddedLogo.imgW - 0.05 : innerW;
+  const titleLines = doc.splitTextToSize(item.name || '', availableTitleW).slice(0, 2);
   doc.text(titleLines, x + padX, topY + 0.12);
 
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(13);
-  doc.setTextColor(0, 0, 0);
+  doc.setFontSize(theme.priceFontSize || 13);
+  doc.setTextColor(...hexToRgb(theme.priceColor));
   doc.text(formatTagPrice(item.price), x + padX, y + height - padY - 0.14);
 
   if (item.size) {
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(6);
+    doc.setFontSize(theme.sizeFontSize || 6);
     doc.setTextColor(71, 85, 105);
     doc.text(item.size, x + padX, y + height - padY - 0.02);
   }
@@ -654,13 +762,6 @@ export function renderSingleAveryLabel(doc, item, x, y, width, height, template,
  * @param {PriceTagItem[]} items
  * @param {AveryTemplate} template
  * @param {Object} [options]
- * @param {number} [options.startPosition=1]
- * @param {number} [options.copiesPerItem=1]
- * @param {string} [options.storeName='777 Liquor Store']
- * @param {boolean} [options.showStoreName=true]
- * @param {boolean} [options.showBarcode=true]
- * @param {boolean} [options.showCategory=true]
- * @param {boolean} [options.drawGuides=false]
  * @returns {jsPDF}
  */
 export function generateAveryPdf(items, template, options = {}) {
@@ -671,7 +772,9 @@ export function generateAveryPdf(items, template, options = {}) {
     showStoreName = true,
     showBarcode = true,
     showCategory = true,
-    drawGuides = false
+    drawGuides = false,
+    theme = DEFAULT_AVERY_THEME,
+    brandLogos = []
   } = options;
 
   const doc = new jsPDF({
@@ -713,7 +816,9 @@ export function generateAveryPdf(items, template, options = {}) {
         storeName,
         showStoreName,
         showBarcode,
-        showCategory
+        showCategory,
+        theme,
+        brandLogos
       });
     });
   });

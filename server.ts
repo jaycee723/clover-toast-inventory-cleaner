@@ -2,6 +2,7 @@ import express from 'express';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { GoogleGenAI, Type } from '@google/genai';
+import rateLimit from 'express-rate-limit';
 import { generateRuleBasedFormatting } from './src/formatting_rules.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -13,6 +14,26 @@ const ALT_PORT = process.env.PORT && Number(process.env.PORT) !== 3000 ? Number(
 const HOST = '0.0.0.0';
 
 app.use(express.json({ limit: '15mb' }));
+
+// Rate limiting to protect API endpoints from excessive traffic and denial of service
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 300, // Limit each IP to 300 requests per 15 minutes
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  message: { ok: false, error: 'Too many requests from this IP, please try again after a few minutes.' }
+});
+
+const aiLimiter = rateLimit({
+  windowMs: 1 * 60 * 1000, // 1 minute
+  max: 60, // Limit each IP to 60 AI requests per minute
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  message: { ok: false, error: 'Too many AI requests from this IP, please slow down.' }
+});
+
+app.use('/api/', apiLimiter);
+app.use('/api/ai/', aiLimiter);
 
 function isGeminiConfigured(): boolean {
   const key = process.env.GEMINI_API_KEY;

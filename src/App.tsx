@@ -4,6 +4,7 @@ import { parseInventoryFile } from './xlsx.js';
 import { parseReferenceCsv, buildReferenceIndex, referenceTemplateCsv } from './reference.js';
 import {
   AVERY_TEMPLATES,
+  DEFAULT_AVERY_THEME,
   extractBrandFromItem,
   extractSizeFromItem,
   generateBarcodeSvg,
@@ -14,6 +15,32 @@ import {
   saveAveryPdf,
   getAveryPdfBlobUrl
 } from './avery_labels.js';
+import {
+  getLocalMasterItems,
+  saveLocalMasterItems,
+  fetchMasterItemsFromCloud,
+  saveMasterItem,
+  deleteMasterItem,
+  reconcileImportWithMaster,
+  executeMerge
+} from './master_inventory.js';
+import {
+  getLocalBrandLogos,
+  listBrandLogosFromCloud,
+  saveBrandLogo,
+  deleteBrandLogo,
+  processLogoImageFile,
+  findLogoForProduct
+} from './brand_logos.js';
+import {
+  saveLocalWorkingState,
+  loadLocalWorkingState,
+  clearLocalWorkingState,
+  saveAppSettings,
+  loadAppSettings
+} from './persistence.js';
+import { MasterInventoryView } from './MasterInventoryView';
+import { PreMergeModal } from './PreMergeModal';
 import {
   buildRows,
   setDecision,
@@ -183,8 +210,22 @@ export function App() {
     undoRecord?: any;
   }>>([]);
 
-  // Avery Price Tag & Label Studio State
+  // Top-Level Navigation View: 'wizard' (4-step Clover->Toast) or 'master_inventory'
+  const [activeView, setActiveView] = useState<'wizard' | 'master_inventory'>('wizard');
+
+  // Master Inventory State
+  const [masterItems, setMasterItems] = useState<any[]>(() => getLocalMasterItems());
+  const [masterStatusMessage, setMasterStatusMessage] = useState<string>('');
+
+  // Pre-Merge Reconciliation State
+  const [isPreMergeModalOpen, setIsPreMergeModalOpen] = useState<boolean>(false);
+  const [preMergeDiffs, setPreMergeDiffs] = useState<any[]>([]);
+  const [preMergeStats, setPreMergeStats] = useState<any>({ total: 0, newCount: 0, updateCount: 0, matchCount: 0 });
+  const [preMergeBusy, setPreMergeBusy] = useState<boolean>(false);
+
+  // Avery Label Studio State
   const [isAveryModalOpen, setIsAveryModalOpen] = useState<boolean>(false);
+  const [averySource, setAverySource] = useState<'wizard' | 'master'>('wizard');
   const [averyTemplateId, setAveryTemplateId] = useState<string>('5160');
   const [averyBrandFilter, setAveryBrandFilter] = useState<string>('all');
   const [averyCategoryFilter, setAveryCategoryFilter] = useState<string>('all');
@@ -199,23 +240,121 @@ export function App() {
   const [averyPdfPreviewUrl, setAveryPdfPreviewUrl] = useState<string | null>(null);
   const [isPdfModalOpen, setIsPdfModalOpen] = useState<boolean>(false);
 
-  // Auth & Cloud State
+  // Custom Theme & Brand Logos State
+  const [averyTheme, setAveryTheme] = useState<any>(() => {
+    const saved = loadAppSettings();
+    return saved.averyTheme ? { ...DEFAULT_AVERY_THEME, ...saved.averyTheme } : { ...DEFAULT_AVERY_THEME };
+  });
+  const [brandLogos, setBrandLogos] = useState<any[]>(() => getLocalBrandLogos());
+  const [brandLogoUploading, setBrandLogoUploading] = useState<boolean>(false);
+  const [newBrandName, setNewBrandName] = useState<string>('');
+  const [isBrandManagerOpen, setIsBrandManagerOpen] = useState<boolean>(false);
+  const [isThemeBuilderOpen, setIsThemeBuilderOpen] = useState<boolean>(false);
+
+  // Auth, Cloud & Persistent State
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [cloudStatus, setCloudStatus] = useState<string>('');
   const [cloudSessions, setCloudSessions] = useState<any[]>([]);
   const [selectedCloudSession, setSelectedCloudSession] = useState<string>('');
   const [wsStatus, setWsStatus] = useState<string>('');
+  const [lastLocalSavedAt, setLastLocalSavedAt] = useState<string>('');
+  const [restoredNotice, setRestoredNotice] = useState<string>('');
+  const [isCloudModalOpen, setIsCloudModalOpen] = useState<boolean>(false);
+  const [cloudSessionName, setCloudSessionName] = useState<string>('');
+  const [cloudSaving, setCloudSaving] = useState<boolean>(false);
 
   // Refs for auto-scroll and file inputs
   const chatStreamRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Subscribe to Firebase Auth
+  // Initial local restore on mount
   useEffect(() => {
-    const unsub = onAuthChange((user: any) => {
+    try {
+      const saved = loadLocalWorkingState();
+      if (saved && saved.records && Array.isArray(saved.records) && saved.records.length > 0) {
+        setRecords(saved.records);
+        if (saved.canonical) setCanonical(saved.canonical);
+        setLoadedFileName(saved.loadedFileName || 'Recovered Inventory');
+        setFileStatusSub(saved.fileStatusSub || `${saved.records.length} items recovered from persistent storage`);
+        if (saved.scorecard) setScorecard(saved.scorecard);
+        if (saved.currentStep && saved.currentStep >= 1 && saved.currentStep <= 4) {
+          setCurrentStep(saved.currentStep);
+        }
+
+        const index = buildReferenceIndex(refs);
+        const restoredRows = buildRows(saved.records, { index, canonical: saved.canonical || [], aliases });
+        if (saved.decisions) {
+          try {
+            loadSession(restoredRows, typeof saved.decisions === 'string' ? saved.decisions : JSON.stringify(saved.decisions));
+          } catch (decErr) {
+            console.warn('Decisions load notice:', decErr);
+          }
+        }
+        applyOffSuggestions(restoredRows);
+        setRows(restoredRows);
+
+        const timeStr = saved.savedAt ? new Date(saved.savedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+        setRestoredNotice(`Recovered ${saved.records.length} items from previous session${timeStr ? ` (${timeStr})` : ''}`);
+        setLastLocalSavedAt(timeStr || 'Just now');
+      }
+    } catch (e) {
+      console.warn('Persistent memory recovery notice:', e);
+    }
+
+    const localMaster = getLocalMasterItems();
+    if (localMaster && localMaster.length > 0) {
+      setMasterItems(localMaster);
+    }
+    const localLogos = getLocalBrandLogos();
+    if (localLogos && localLogos.length > 0) {
+      setBrandLogos(localLogos);
+    }
+  }, []);
+
+  // Auto-save working session debounced
+  useEffect(() => {
+    if (!records || records.length === 0) return;
+    const timer = setTimeout(() => {
+      try {
+        const decisions = rows && rows.length > 0 ? saveSession(rows) : {};
+        const success = saveLocalWorkingState({
+          records,
+          canonical,
+          loadedFileName,
+          fileStatusSub,
+          currentStep,
+          scorecard,
+          decisions,
+        });
+        if (success) {
+          const nowStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+          setLastLocalSavedAt(nowStr);
+        }
+      } catch (e) {
+        console.warn('Auto-save error:', e);
+      }
+    }, 800);
+    return () => clearTimeout(timer);
+  }, [records, rows, loadedFileName, fileStatusSub, currentStep, scorecard, canonical]);
+
+  // Subscribe to Firebase Auth and sync cloud data
+  useEffect(() => {
+    const unsub = onAuthChange(async (user: any) => {
       setCurrentUser(user);
       if (user) {
         refreshCloudSessions();
+        try {
+          const cloudItems = await fetchMasterItemsFromCloud();
+          if (cloudItems && cloudItems.length > 0) {
+            setMasterItems(cloudItems);
+          }
+          const cloudLogos = await listBrandLogosFromCloud();
+          if (cloudLogos && cloudLogos.length > 0) {
+            setBrandLogos(cloudLogos);
+          }
+        } catch (e) {
+          console.warn('Syncing cloud master items notice:', e);
+        }
       } else {
         setCloudSessions([]);
       }
@@ -862,6 +1001,22 @@ export function App() {
 
   // Avery Price Tag & Shelf Label Studio Computations
   const averyAllItems = useMemo(() => {
+    if (averySource === 'master' || (rows.length === 0 && masterItems.length > 0)) {
+      return masterItems.map((m) => {
+        const brand = m.brand || extractBrandFromItem(m.name);
+        const size = m.size || extractSizeFromItem(m.name);
+        return {
+          id: String(m.id || m.barcode),
+          name: m.name,
+          price: m.price,
+          barcode: m.barcode,
+          category: m.category || 'General',
+          brand,
+          size
+        };
+      });
+    }
+
     return rows.map((r) => {
       const name = r.current_name || r.clean?.name || r.raw?.['Item Name'] || r.name || '';
       const barcode = r.barcode?.original || r.barcode?.padded || r.identity?.barcode || r.clean?.barcode || '';
@@ -879,7 +1034,7 @@ export function App() {
         size
       };
     });
-  }, [rows]);
+  }, [rows, masterItems, averySource]);
 
   const averyAvailableBrands = useMemo(() => {
     const set = new Set<string>();
@@ -927,15 +1082,27 @@ export function App() {
     return paginateAveryLabels(averyItemsToPrint, selectedTemplate, averyStartPosition, averyCopies);
   }, [averyItemsToPrint, selectedTemplate, averyStartPosition, averyCopies]);
 
-  const openAveryModal = () => {
-    if (rows.length === 0) {
-      setStatusText('Please load or clean an inventory file first to print price tags.');
+  const openAveryModal = (source: 'wizard' | 'master' = 'wizard', customItems?: any[]) => {
+    setAverySource(source);
+    const pool = (source === 'master' || (rows.length === 0 && masterItems.length > 0)) ? masterItems : rows;
+    if (pool.length === 0 && (!customItems || customItems.length === 0)) {
+      setStatusText('Please load an inventory file or add items to Master Inventory first.');
       return;
     }
-    if (averySelectedIds.size === 0) {
-      setAverySelectedIds(new Set(rows.map((r) => String(r.id))));
+    if (customItems && customItems.length > 0) {
+      setAverySelectedIds(new Set(customItems.map((c) => String(c.id || c.barcode))));
+    } else if (averySelectedIds.size === 0) {
+      setAverySelectedIds(new Set(pool.map((r) => String(r.id || r.barcode))));
     }
     setIsAveryModalOpen(true);
+  };
+
+  const handleUpdateTheme = (updates: any) => {
+    setAveryTheme((prev: any) => {
+      const next = { ...prev, ...updates };
+      saveAppSettings({ averyTheme: next });
+      return next;
+    });
   };
 
   const handleSaveAveryPdf = () => {
@@ -956,7 +1123,9 @@ export function App() {
         showStoreName: averyShowStoreName,
         showBarcode: averyShowBarcode,
         showCategory: true,
-        drawGuides: averyDrawGuides
+        drawGuides: averyDrawGuides,
+        theme: averyTheme,
+        brandLogos
       },
       filename
     );
@@ -976,10 +1145,134 @@ export function App() {
       showStoreName: averyShowStoreName,
       showBarcode: averyShowBarcode,
       showCategory: true,
-      drawGuides: averyDrawGuides
+      drawGuides: averyDrawGuides,
+      theme: averyTheme,
+      brandLogos
     });
     setAveryPdfPreviewUrl(url);
     setIsPdfModalOpen(true);
+  };
+
+  // Master Inventory CRUD handlers
+  const handleSaveMasterItem = async (item: any) => {
+    const saved = await saveMasterItem(item);
+    setMasterItems((prev) => {
+      const idx = prev.findIndex((i) => i.id === saved.id || (saved.barcode && i.barcode === saved.barcode));
+      if (idx >= 0) {
+        const copy = [...prev];
+        copy[idx] = saved;
+        return copy;
+      }
+      return [saved, ...prev];
+    });
+    setMasterStatusMessage(`Saved "${saved.name}" to Master Inventory`);
+    postAnnouncement(`Saved "${saved.name}" in Master Inventory.`);
+  };
+
+  const handleDeleteMasterItem = async (itemId: string) => {
+    await deleteMasterItem(itemId);
+    setMasterItems((prev) => prev.filter((i) => i.id !== itemId));
+    setMasterStatusMessage('Item removed from Master Inventory');
+    postAnnouncement('Item removed from Master Inventory.');
+  };
+
+  // Pre-Merge handlers
+  const handleOpenPreMerge = () => {
+    if (rows.length === 0) {
+      setStatusText('Please load and clean an inventory file first.');
+      return;
+    }
+    const { diffs, stats } = reconcileImportWithMaster(rows, masterItems);
+    setPreMergeDiffs(diffs);
+    setPreMergeStats(stats);
+    setIsPreMergeModalOpen(true);
+  };
+
+  const handleUpdateDiffItem = (index: number, updatedFields: any) => {
+    setPreMergeDiffs((prev) => {
+      const copy = [...prev];
+      if (copy[index]) {
+        copy[index] = { ...copy[index], ...updatedFields };
+        if (updatedFields.incoming) {
+          copy[index].incoming = { ...copy[index].incoming, ...updatedFields.incoming };
+        }
+      }
+      return copy;
+    });
+  };
+
+  const handleExecuteMergeAll = async () => {
+    setPreMergeBusy(true);
+    try {
+      const updated = await executeMerge(preMergeDiffs, masterItems, 'all');
+      setMasterItems(updated);
+      setIsPreMergeModalOpen(false);
+      postAnnouncement(`🎉 Successfully merged ${updated.length} items into the Master Inventory database!`);
+      setStatusText(`Merged ${preMergeDiffs.filter((d) => d.selected).length} items into Master Inventory.`);
+    } catch (err: any) {
+      alert(`Error during merge: ${err.message || String(err)}`);
+    } finally {
+      setPreMergeBusy(false);
+    }
+  };
+
+  const handleExecuteMergeNewOnly = async () => {
+    setPreMergeBusy(true);
+    try {
+      const updated = await executeMerge(preMergeDiffs, masterItems, 'new_only');
+      setMasterItems(updated);
+      setIsPreMergeModalOpen(false);
+      postAnnouncement(`🎉 Added ${preMergeStats.newCount} new items to Master Inventory (existing items preserved)!`);
+      setStatusText(`Added ${preMergeStats.newCount} new items to Master Inventory.`);
+    } catch (err: any) {
+      alert(`Error during merge: ${err.message || String(err)}`);
+    } finally {
+      setPreMergeBusy(false);
+    }
+  };
+
+  // Brand Logo Management handlers
+  const handleUploadBrandLogo = async (file: File) => {
+    if (!newBrandName.trim()) {
+      alert('Please enter the brand name first (e.g. "Jack Daniel\'s")');
+      return;
+    }
+    setBrandLogoUploading(true);
+    try {
+      const { dataUrl, width, height } = await processLogoImageFile(file, 400);
+      const saved = await saveBrandLogo({
+        brandName: newBrandName.trim(),
+        imageDataUrl: dataUrl,
+        width,
+        height
+      });
+      setBrandLogos((prev) => {
+        const idx = prev.findIndex((l) => l.brandKey === saved.brandKey);
+        if (idx >= 0) {
+          const copy = [...prev];
+          copy[idx] = saved;
+          return copy;
+        }
+        return [saved, ...prev];
+      });
+      setNewBrandName('');
+      postAnnouncement(`🏷️ Hosted logo for brand "${saved.brandName}"! Automatically linked to matching items.`);
+    } catch (err: any) {
+      alert(`Logo upload failed: ${err.message || String(err)}`);
+    } finally {
+      setBrandLogoUploading(false);
+    }
+  };
+
+  const handleDeleteBrandLogo = async (logoId: string, brandName: string) => {
+    if (!window.confirm(`Delete logo for brand "${brandName}"?`)) return;
+    try {
+      await deleteBrandLogo(logoId);
+      setBrandLogos((prev) => prev.filter((l) => l.id !== logoId));
+      postAnnouncement(`Deleted logo for "${brandName}".`);
+    } catch (err: any) {
+      alert(`Could not delete logo: ${err.message || String(err)}`);
+    }
   };
 
   const handlePrintAverySheets = () => {
@@ -1203,7 +1496,7 @@ export function App() {
             type="button"
             className="btn-toast btn-sm"
             style={{ background: '#7c3aed', color: '#ffffff' }}
-            onClick={openAveryModal}
+            onClick={() => openAveryModal('wizard')}
             title="Open Avery Price Tag & Shelf Label Studio"
           >
             <span>🏷️ Print Price Tags (Avery)</span>
@@ -1227,13 +1520,84 @@ export function App() {
         </div>
       </header>
 
-      {/* 4-Step Guided Wizard Stepper */}
-      <nav className="wizard-stepper" aria-label="Toast Import Steps">
-        <div
-          className={`stepper-step ${currentStep === 1 ? 'active' : ''} ${currentStep > 1 ? 'completed' : ''}`}
-          onClick={() => setCurrentStep(1)}
-          style={{ cursor: 'pointer' }}
+      {/* Top Navigation Bar: Wizard vs Master Inventory */}
+      <div style={{ display: 'flex', gap: 10, padding: '10px 16px', background: '#090d16', borderBottom: '1px solid #1e293b', alignItems: 'center' }}>
+        <button
+          type="button"
+          onClick={() => setActiveView('wizard')}
+          style={{
+            padding: '8px 16px',
+            borderRadius: 6,
+            fontWeight: 600,
+            fontSize: 13,
+            border: activeView === 'wizard' ? '1px solid #3b82f6' : '1px solid #334155',
+            background: activeView === 'wizard' ? '#1e3a8a' : '#0f172a',
+            color: activeView === 'wizard' ? '#ffffff' : '#94a3b8',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            transition: 'all 0.15s'
+          }}
         >
+          <span>⚡ Import &amp; Clean Wizard</span>
+          <span style={{ fontSize: 11, background: activeView === 'wizard' ? '#172554' : '#1e293b', padding: '2px 8px', borderRadius: 12, color: activeView === 'wizard' ? '#93c5fd' : '#cbd5e1' }}>
+            {records.length > 0 ? `${records.length} items (Step ${currentStep})` : 'New Import'}
+          </span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveView('master_inventory')}
+          style={{
+            padding: '8px 16px',
+            borderRadius: 6,
+            fontWeight: 600,
+            fontSize: 13,
+            border: activeView === 'master_inventory' ? '1px solid #10b981' : '1px solid #334155',
+            background: activeView === 'master_inventory' ? '#064e3b' : '#0f172a',
+            color: activeView === 'master_inventory' ? '#ffffff' : '#94a3b8',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            transition: 'all 0.15s'
+          }}
+        >
+          <span>📦 Master Inventory Catalog</span>
+          <span style={{ fontSize: 11, background: activeView === 'master_inventory' ? '#022c22' : '#1e293b', padding: '2px 8px', borderRadius: 12, color: activeView === 'master_inventory' ? '#6ee7b7' : '#cbd5e1' }}>
+            {masterItems.length} items stored
+          </span>
+        </button>
+
+        {masterStatusMessage && (
+          <span style={{ marginLeft: 'auto', fontSize: 12, color: '#6ee7b7' }}>
+            {masterStatusMessage}
+          </span>
+        )}
+      </div>
+
+      {activeView === 'master_inventory' ? (
+        <MasterInventoryView
+          items={masterItems}
+          brandLogos={brandLogos}
+          onSaveItem={handleSaveMasterItem}
+          onDeleteItem={handleDeleteMasterItem}
+          onOpenAveryWithItems={(items) => {
+            openAveryModal('master', items);
+          }}
+          onSwitchToWizard={() => setActiveView('wizard')}
+          statusMessage={masterStatusMessage}
+        />
+      ) : (
+        <>
+          {/* 4-Step Guided Wizard Stepper */}
+          <nav className="wizard-stepper" aria-label="Toast Import Steps">
+            <div
+              className={`stepper-step ${currentStep === 1 ? 'active' : ''} ${currentStep > 1 ? 'completed' : ''}`}
+              onClick={() => setCurrentStep(1)}
+              style={{ cursor: 'pointer' }}
+            >
           <div className="step-num">1</div>
           <div className="step-label">1. Upload Clover File</div>
         </div>
@@ -1574,8 +1938,17 @@ export function App() {
                   <button
                     type="button"
                     className="btn-toast btn-sm"
+                    style={{ background: '#059669', borderColor: '#10b981' }}
+                    onClick={handleOpenPreMerge}
+                    title="Reconcile and commit cleaned items to the Master Inventory catalog"
+                  >
+                    <span>📥 Save to Inventory Database</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-toast btn-sm"
                     style={{ background: '#7c3aed' }}
-                    onClick={openAveryModal}
+                    onClick={() => openAveryModal('wizard')}
                     title="Print Price Tags for shelf or bottles based on Avery label sheet templates"
                   >
                     <span>🏷️ Print Price Tags</span>
@@ -1845,11 +2218,32 @@ export function App() {
                     <button type="button" className="btn-outline btn-sm" onClick={handleOpenAveryPdf}>
                       👁️ Open PDF Preview
                     </button>
-                    <button type="button" className="btn-secondary btn-sm" onClick={openAveryModal}>
+                    <button type="button" className="btn-secondary btn-sm" onClick={() => openAveryModal('wizard')}>
                       🏷️ Customize Labels
                     </button>
                     <button type="button" className="btn-outline btn-sm" onClick={handleExportAveryCsvFile}>
                       📥 Export Avery CSV
+                    </button>
+                  </div>
+                </div>
+
+                {/* Card 4: Master Inventory Database */}
+                <div className="export-card" style={{ borderColor: '#059669', background: 'linear-gradient(135deg, rgba(5, 150, 105, 0.12) 0%, rgba(15, 23, 42, 0.8) 100%)' }}>
+                  <div>
+                    <h3 className="export-card-title">
+                      <span>📦 Master Inventory Database</span>
+                      <span className="app-title-badge" style={{ background: '#059669' }}>Permanent Catalog</span>
+                    </h3>
+                    <p className="export-card-desc">
+                      Commit these cleaned items to your persistent Master Inventory catalog ({masterItems.length} items currently stored). Reconcile new vs existing items, preview diffs, and save to Firestore with offline fallback.
+                    </p>
+                  </div>
+                  <div className="flex-wrap" style={{ gap: 8 }}>
+                    <button type="button" className="btn-toast" style={{ background: '#059669', borderColor: '#10b981' }} onClick={handleOpenPreMerge}>
+                      📥 Commit Cleaned Items to Inventory
+                    </button>
+                    <button type="button" className="btn-secondary btn-sm" onClick={() => setActiveView('master_inventory')}>
+                      📂 View Master Catalog ({masterItems.length})
                     </button>
                   </div>
                 </div>
@@ -2070,6 +2464,8 @@ export function App() {
           </aside>
         )}
       </div>
+        </>
+      )}
 
       {/* Toast CSV Preview Modal */}
       {previewModalOpen && previewData && (
@@ -2622,6 +3018,331 @@ export function App() {
                     </div>
                   </div>
                 </div>
+
+                {/* 5. Custom Theme & Styling Builder */}
+                <div className="avery-control-card">
+                  <div
+                    className="avery-control-label"
+                    style={{ cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
+                    onClick={() => setIsThemeBuilderOpen((v) => !v)}
+                  >
+                    <span>🎨 5. Theme &amp; Styling Builder</span>
+                    <span style={{ fontSize: 12, color: '#60a5fa' }}>{isThemeBuilderOpen ? '▲ Hide' : '▼ Customize'}</span>
+                  </div>
+
+                  {isThemeBuilderOpen && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 10 }}>
+                      <div style={{ fontSize: 11, fontWeight: 600, color: '#94a3b8', textTransform: 'uppercase' }}>
+                        Custom Color Palette
+                      </div>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                        <label style={{ display: 'flex', flexDirection: 'column', gap: 2, fontSize: 11, color: '#cbd5e1' }}>
+                          <span>Price Color:</span>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <input
+                              type="color"
+                              value={averyTheme.priceColor || '#000000'}
+                              onChange={(e) => handleUpdateTheme({ priceColor: e.target.value })}
+                              style={{ width: 32, height: 26, padding: 0, border: 'none', background: 'none', cursor: 'pointer' }}
+                            />
+                            <span style={{ fontSize: 11, fontFamily: 'monospace' }}>{averyTheme.priceColor}</span>
+                          </div>
+                        </label>
+
+                        <label style={{ display: 'flex', flexDirection: 'column', gap: 2, fontSize: 11, color: '#cbd5e1' }}>
+                          <span>Product Title:</span>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <input
+                              type="color"
+                              value={averyTheme.titleColor || '#000000'}
+                              onChange={(e) => handleUpdateTheme({ titleColor: e.target.value })}
+                              style={{ width: 32, height: 26, padding: 0, border: 'none', background: 'none', cursor: 'pointer' }}
+                            />
+                            <span style={{ fontSize: 11, fontFamily: 'monospace' }}>{averyTheme.titleColor}</span>
+                          </div>
+                        </label>
+
+                        <label style={{ display: 'flex', flexDirection: 'column', gap: 2, fontSize: 11, color: '#cbd5e1' }}>
+                          <span>Store Header:</span>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <input
+                              type="color"
+                              value={averyTheme.storeColor || '#64748b'}
+                              onChange={(e) => handleUpdateTheme({ storeColor: e.target.value })}
+                              style={{ width: 32, height: 26, padding: 0, border: 'none', background: 'none', cursor: 'pointer' }}
+                            />
+                            <span style={{ fontSize: 11, fontFamily: 'monospace' }}>{averyTheme.storeColor}</span>
+                          </div>
+                        </label>
+
+                        <label style={{ display: 'flex', flexDirection: 'column', gap: 2, fontSize: 11, color: '#cbd5e1' }}>
+                          <span>Tag Background:</span>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <input
+                              type="color"
+                              value={averyTheme.tagBgColor || '#ffffff'}
+                              onChange={(e) => handleUpdateTheme({ tagBgColor: e.target.value })}
+                              style={{ width: 32, height: 26, padding: 0, border: 'none', background: 'none', cursor: 'pointer' }}
+                            />
+                            <span style={{ fontSize: 11, fontFamily: 'monospace' }}>{averyTheme.tagBgColor}</span>
+                          </div>
+                        </label>
+
+                        <label style={{ display: 'flex', flexDirection: 'column', gap: 2, fontSize: 11, color: '#cbd5e1' }}>
+                          <span>Border Color:</span>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <input
+                              type="color"
+                              value={averyTheme.borderColor || '#e2e8f0'}
+                              onChange={(e) => handleUpdateTheme({ borderColor: e.target.value })}
+                              style={{ width: 32, height: 26, padding: 0, border: 'none', background: 'none', cursor: 'pointer' }}
+                            />
+                            <span style={{ fontSize: 11, fontFamily: 'monospace' }}>{averyTheme.borderColor}</span>
+                          </div>
+                        </label>
+
+                        <label style={{ display: 'flex', flexDirection: 'column', gap: 2, fontSize: 11, color: '#cbd5e1' }}>
+                          <span>Border Style:</span>
+                          <select
+                            className="avery-select"
+                            style={{ padding: '3px 6px', fontSize: 11 }}
+                            value={averyTheme.borderStyle || 'hairline'}
+                            onChange={(e) => handleUpdateTheme({ borderStyle: e.target.value })}
+                          >
+                            <option value="hairline">Hairline</option>
+                            <option value="solid-bold">Solid Bold</option>
+                            <option value="dashed">Dashed Perforation</option>
+                            <option value="none">None (Borderless)</option>
+                          </select>
+                        </label>
+                      </div>
+
+                      <div style={{ fontSize: 11, fontWeight: 600, color: '#94a3b8', textTransform: 'uppercase', marginTop: 4 }}>
+                        Typography &amp; Scale
+                      </div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                        <div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: '#cbd5e1' }}>
+                            <span>Price Font Size:</span>
+                            <strong>{averyTheme.priceFontSize || 13}pt</strong>
+                          </div>
+                          <input
+                            type="range"
+                            min="9"
+                            max="24"
+                            step="1"
+                            value={averyTheme.priceFontSize || 13}
+                            onChange={(e) => handleUpdateTheme({ priceFontSize: Number(e.target.value) })}
+                            style={{ width: '100%' }}
+                          />
+                        </div>
+
+                        <div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: '#cbd5e1' }}>
+                            <span>Item Title Font Size:</span>
+                            <strong>{averyTheme.titleFontSize || 8}pt</strong>
+                          </div>
+                          <input
+                            type="range"
+                            min="6"
+                            max="14"
+                            step="0.5"
+                            value={averyTheme.titleFontSize || 8}
+                            onChange={(e) => handleUpdateTheme({ titleFontSize: Number(e.target.value) })}
+                            style={{ width: '100%' }}
+                          />
+                        </div>
+
+                        <div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: '#cbd5e1' }}>
+                            <span>Store Header Font Size:</span>
+                            <strong>{averyTheme.storeFontSize || 6.5}pt</strong>
+                          </div>
+                          <input
+                            type="range"
+                            min="5"
+                            max="11"
+                            step="0.5"
+                            value={averyTheme.storeFontSize || 6.5}
+                            onChange={(e) => handleUpdateTheme({ storeFontSize: Number(e.target.value) })}
+                            style={{ width: '100%' }}
+                          />
+                        </div>
+
+                        <div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: '#cbd5e1' }}>
+                            <span>Label Inner Padding:</span>
+                            <strong>{averyTheme.paddingInches || 0.06} in</strong>
+                          </div>
+                          <input
+                            type="range"
+                            min="0.02"
+                            max="0.14"
+                            step="0.01"
+                            value={averyTheme.paddingInches || 0.06}
+                            onChange={(e) => handleUpdateTheme({ paddingInches: Number(e.target.value) })}
+                            style={{ width: '100%' }}
+                          />
+                        </div>
+                      </div>
+
+                      <div style={{ fontSize: 11, fontWeight: 600, color: '#94a3b8', textTransform: 'uppercase', marginTop: 4 }}>
+                        Brand Logo Placement
+                      </div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: '#cbd5e1', cursor: 'pointer' }}>
+                          <input
+                            type="checkbox"
+                            checked={averyTheme.showBrandLogos !== false}
+                            onChange={(e) => handleUpdateTheme({ showBrandLogos: e.target.checked })}
+                          />
+                          <span>Attach Brand Logos to Matching Items</span>
+                        </label>
+
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 4 }}>
+                          <div>
+                            <div style={{ fontSize: 11, color: '#94a3b8', marginBottom: 2 }}>Placement:</div>
+                            <select
+                              className="avery-select"
+                              style={{ padding: '4px 6px', fontSize: 11 }}
+                              value={averyTheme.logoPlacement || 'top-right'}
+                              onChange={(e) => handleUpdateTheme({ logoPlacement: e.target.value })}
+                            >
+                              <option value="top-right">Top-Right Corner</option>
+                              <option value="top-left">Top-Left Corner</option>
+                              <option value="center-top">Centered Top</option>
+                              <option value="beside-price">Beside Price</option>
+                            </select>
+                          </div>
+
+                          <div>
+                            <div style={{ fontSize: 11, color: '#94a3b8', marginBottom: 2 }}>Logo Scale:</div>
+                            <select
+                              className="avery-select"
+                              style={{ padding: '4px 6px', fontSize: 11 }}
+                              value={averyTheme.logoScale || 'medium'}
+                              onChange={(e) => handleUpdateTheme({ logoScale: e.target.value })}
+                            >
+                              <option value="small">Small (Compact)</option>
+                              <option value="medium">Medium (Standard)</option>
+                              <option value="large">Large (Bold)</option>
+                            </select>
+                          </div>
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        className="btn-secondary btn-sm"
+                        style={{ fontSize: 11, padding: '4px 8px', alignSelf: 'flex-start', marginTop: 6 }}
+                        onClick={() => handleUpdateTheme(DEFAULT_AVERY_THEME)}
+                      >
+                        Reset Theme to Defaults
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                {/* 6. Hosted Brand Logos Manager */}
+                <div className="avery-control-card">
+                  <div
+                    className="avery-control-label"
+                    style={{ cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
+                    onClick={() => setIsBrandManagerOpen((v) => !v)}
+                  >
+                    <span>🏷️ 6. Brand Logos &amp; Assets ({brandLogos.length})</span>
+                    <span style={{ fontSize: 12, color: '#60a5fa' }}>{isBrandManagerOpen ? '▲ Hide' : '▼ Manage'}</span>
+                  </div>
+
+                  {isBrandManagerOpen && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 10 }}>
+                      <div style={{ fontSize: 11, color: '#94a3b8' }}>
+                        Upload logos to automatically display on price tags matching that brand name. Saved in Firestore &amp; local storage.
+                      </div>
+
+                      <div style={{ background: '#1e293b', border: '1px solid #334155', borderRadius: 6, padding: 10 }}>
+                        <div style={{ fontSize: 11, color: '#cbd5e1', marginBottom: 4 }}>Add Brand Logo:</div>
+                        <input
+                          type="text"
+                          className="avery-input"
+                          style={{ marginBottom: 6 }}
+                          placeholder="Brand name (e.g. Jack Daniel's, Hennessy)"
+                          value={newBrandName}
+                          onChange={(e) => setNewBrandName(e.target.value)}
+                        />
+                        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                          <input
+                            type="file"
+                            accept="image/*"
+                            id="brand-logo-file-input"
+                            style={{ display: 'none' }}
+                            onChange={(e) => {
+                              if (e.target.files?.[0]) {
+                                handleUploadBrandLogo(e.target.files[0]);
+                                e.target.value = '';
+                              }
+                            }}
+                          />
+                          <button
+                            type="button"
+                            className="btn-toast btn-sm"
+                            style={{ background: '#059669', fontSize: 11, flex: 1 }}
+                            disabled={brandLogoUploading}
+                            onClick={() => {
+                              if (!newBrandName.trim()) {
+                                alert('Please type the Brand Name above first');
+                                return;
+                              }
+                              document.getElementById('brand-logo-file-input')?.click();
+                            }}
+                          >
+                            {brandLogoUploading ? 'Uploading…' : '📁 Upload Logo Image'}
+                          </button>
+                        </div>
+                      </div>
+
+                      <div style={{ maxHeight: 180, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                        {brandLogos.length === 0 ? (
+                          <div style={{ fontSize: 11, color: '#94a3b8', textAlign: 'center', padding: '10px 0' }}>
+                            No custom brand logos uploaded yet.
+                          </div>
+                        ) : (
+                          brandLogos.map((logo) => (
+                            <div
+                              key={logo.id}
+                              style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'space-between',
+                                background: '#1e293b',
+                                border: '1px solid #334155',
+                                borderRadius: 6,
+                                padding: '6px 10px'
+                              }}
+                            >
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                <img
+                                  src={logo.imageDataUrl}
+                                  alt={logo.brandName}
+                                  style={{ width: 28, height: 28, objectFit: 'contain', background: '#ffffff', borderRadius: 4, padding: 2 }}
+                                />
+                                <span style={{ fontSize: 12, fontWeight: 500, color: '#f8fafc' }}>{logo.brandName}</span>
+                              </div>
+                              <button
+                                type="button"
+                                style={{ background: 'none', border: 'none', color: '#f87171', cursor: 'pointer', fontSize: 13 }}
+                                onClick={() => handleDeleteBrandLogo(logo.id, logo.brandName)}
+                                title="Delete logo"
+                              >
+                                🗑️
+                              </button>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
               </aside>
 
               {/* Right Live Sheet Preview Area */}
@@ -2710,24 +3431,59 @@ export function App() {
                             const barcodeSvg = averyShowBarcode && item.barcode
                               ? generateBarcodeSvg(item.barcode, selectedTemplate.id === '5167' ? 14 : 22)
                               : '';
+                            const logo = averyTheme.showBrandLogos !== false ? findLogoForProduct(item, brandLogos) : null;
+                            const borderCss = averyTheme.borderStyle === 'dashed'
+                              ? `1px dashed ${averyTheme.borderColor || '#cbd5e1'}`
+                              : averyTheme.borderStyle === 'solid-bold'
+                              ? `2px solid ${averyTheme.borderColor || '#000000'}`
+                              : averyTheme.borderStyle === 'none'
+                              ? 'none'
+                              : `1px solid ${averyTheme.borderColor || '#e2e8f0'}`;
 
                             return (
                               <div
                                 key={itemIdx}
                                 className="avery-label-cell"
                                 style={{
-                                  padding: selectedTemplate.id === '5167' ? '0.03in' : '0.06in',
+                                  padding: `${averyTheme.paddingInches || (selectedTemplate.id === '5167' ? 0.03 : 0.06)}in`,
+                                  background: averyTheme.tagBgColor || '#ffffff',
+                                  border: borderCss,
+                                  borderRadius: `${averyTheme.borderRadius || 2}px`,
+                                  position: 'relative'
                                 }}
                               >
+                                {/* Brand Logo if Top-Right or Top-Left */}
+                                {logo && (averyTheme.logoPlacement === 'top-right' || averyTheme.logoPlacement === 'top-left') && (
+                                  <img
+                                    src={logo.imageDataUrl}
+                                    alt={logo.brandName}
+                                    style={{
+                                      position: 'absolute',
+                                      top: '0.04in',
+                                      right: averyTheme.logoPlacement === 'top-right' ? '0.05in' : undefined,
+                                      left: averyTheme.logoPlacement === 'top-left' ? '0.05in' : undefined,
+                                      height: averyTheme.logoScale === 'small' ? '0.22in' : averyTheme.logoScale === 'large' ? '0.44in' : '0.32in',
+                                      maxWidth: '0.6in',
+                                      objectFit: 'contain'
+                                    }}
+                                  />
+                                )}
+
                                 {/* Header: Store or Category */}
                                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                                   {averyShowStoreName && (
-                                    <div className="avery-tag-store-header">
+                                    <div
+                                      className="avery-tag-store-header"
+                                      style={{ color: averyTheme.storeColor || '#64748b', fontSize: `${averyTheme.storeFontSize || 6.5}pt` }}
+                                    >
                                       {averyStoreName || '777 Liquor Store'}
                                     </div>
                                   )}
                                   {item.category && selectedTemplate.id !== '5167' && (
-                                    <div className="avery-tag-category-pill">
+                                    <div
+                                      className="avery-tag-category-pill"
+                                      style={{ color: averyTheme.storeColor || '#64748b' }}
+                                    >
                                       {item.category}
                                     </div>
                                   )}
@@ -2737,7 +3493,9 @@ export function App() {
                                 <div
                                   className="avery-tag-title"
                                   style={{
-                                    fontSize: selectedTemplate.id === '5167' ? '7pt' : selectedTemplate.id === '5163' ? '12pt' : '8.5pt'
+                                    fontSize: `${averyTheme.titleFontSize || (selectedTemplate.id === '5167' ? 7 : selectedTemplate.id === '5163' ? 12 : 8.5)}pt`,
+                                    color: averyTheme.titleColor || '#000000',
+                                    paddingRight: (logo && averyTheme.logoPlacement === 'top-right') ? '0.65in' : undefined
                                   }}
                                   title={item.name}
                                 >
@@ -2750,17 +3508,30 @@ export function App() {
                                     <div
                                       className="avery-tag-price"
                                       style={{
-                                        fontSize: selectedTemplate.id === '5167' ? '9pt' : selectedTemplate.id === '5163' ? '18pt' : '13pt'
+                                        fontSize: `${averyTheme.priceFontSize || (selectedTemplate.id === '5167' ? 9 : selectedTemplate.id === '5163' ? 18 : 13)}pt`,
+                                        color: averyTheme.priceColor || '#000000'
                                       }}
                                     >
                                       {formatTagPrice(item.price)}
                                     </div>
                                     {item.size && selectedTemplate.id !== '5167' && (
-                                      <div style={{ fontSize: '6.5pt', fontWeight: 600, color: '#475569' }}>
+                                      <div style={{ fontSize: `${averyTheme.sizeFontSize || 6.5}pt`, fontWeight: 600, color: '#475569' }}>
                                         {item.size}
                                       </div>
                                     )}
                                   </div>
+
+                                  {logo && averyTheme.logoPlacement === 'beside-price' && (
+                                    <img
+                                      src={logo.imageDataUrl}
+                                      alt={logo.brandName}
+                                      style={{
+                                        height: '0.26in',
+                                        maxWidth: '0.5in',
+                                        objectFit: 'contain'
+                                      }}
+                                    />
+                                  )}
 
                                   {averyShowBarcode && item.barcode && (
                                     <div className="avery-tag-barcode-wrap">
@@ -2841,6 +3612,20 @@ export function App() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Pre-Merge Import Reconciliation & Edit Diff Modal */}
+      {isPreMergeModalOpen && (
+        <PreMergeModal
+          isOpen={isPreMergeModalOpen}
+          diffs={preMergeDiffs}
+          stats={preMergeStats}
+          isBusy={preMergeBusy}
+          onUpdateDiffItem={handleUpdateDiffItem}
+          onMergeAll={handleExecuteMergeAll}
+          onMergeNewOnly={handleExecuteMergeNewOnly}
+          onClose={() => setIsPreMergeModalOpen(false)}
+        />
       )}
     </main>
   );

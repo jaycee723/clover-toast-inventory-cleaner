@@ -29,18 +29,17 @@ service cloud.firestore {
 
     function isValidUser(data, userId) {
       return data.keys().hasAll(['id', 'email', 'createdAt'])
-        && data.keys().hasOnly(['id', 'email', 'createdAt'])
+        && data.keys().hasOnly(['id', 'email', 'createdAt', 'displayName', 'photoURL', 'lastLoginAt'])
         && data.id == userId
         && data.id == request.auth.uid
         && data.email is string
-        && data.email.size() > 0
         && data.email.size() <= 256
         && data.createdAt is timestamp;
     }
 
     function isValidSession(data, userId, sessionId) {
       return data.keys().hasAll(['id', 'userId', 'name', 'decisionsJson', 'itemCount', 'approvedCount', 'createdAt', 'updatedAt'])
-        && data.keys().hasOnly(['id', 'userId', 'name', 'decisionsJson', 'itemCount', 'approvedCount', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'userId', 'name', 'decisionsJson', 'itemCount', 'approvedCount', 'createdAt', 'updatedAt', 'fileName', 'recordsJson', 'currentStep'])
         && data.id == sessionId
         && data.userId == userId
         && data.userId == request.auth.uid
@@ -49,10 +48,54 @@ service cloud.firestore {
         && data.name.size() <= 128
         && data.decisionsJson is string
         && data.decisionsJson.size() <= 500000
+        && (!('recordsJson' in data) || (data.recordsJson is string && data.recordsJson.size() <= 750000))
+        && (!('fileName' in data) || (data.fileName is string && data.fileName.size() <= 128))
+        && (!('currentStep' in data) || (data.currentStep is number && data.currentStep >= 1 && data.currentStep <= 4))
         && data.itemCount is number
         && data.itemCount >= 0
         && data.approvedCount is number
         && data.approvedCount >= 0
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidBrandLogo(data, userId, logoId) {
+      return data.keys().hasAll(['id', 'userId', 'brandName', 'brandKey', 'imageDataUrl', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'userId', 'brandName', 'brandKey', 'imageDataUrl', 'width', 'height', 'createdAt', 'updatedAt'])
+        && data.id == logoId
+        && data.userId == userId
+        && data.userId == request.auth.uid
+        && data.brandName is string
+        && data.brandName.size() > 0
+        && data.brandName.size() <= 128
+        && data.brandKey is string
+        && data.brandKey.size() > 0
+        && data.brandKey.size() <= 128
+        && data.imageDataUrl is string
+        && data.imageDataUrl.size() <= 350000
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidMasterItem(data, userId, itemId) {
+      return data.keys().hasAll(['id', 'userId', 'barcode', 'name', 'category', 'price', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'userId', 'barcode', 'name', 'category', 'price', 'size', 'brand', 'sku', 'notes', 'source', 'createdAt', 'updatedAt'])
+        && data.id == itemId
+        && data.userId == userId
+        && data.userId == request.auth.uid
+        && data.barcode is string
+        && data.barcode.size() <= 64
+        && data.name is string
+        && data.name.size() > 0
+        && data.name.size() <= 256
+        && data.category is string
+        && data.category.size() <= 128
+        && (data.price is string || data.price is number)
+        && (!('size' in data) || (data.size is string && data.size.size() <= 64))
+        && (!('brand' in data) || (data.brand is string && data.brand.size() <= 128))
+        && (!('sku' in data) || (data.sku is string && data.sku.size() <= 64))
+        && (!('notes' in data) || (data.notes is string && data.notes.size() <= 512))
+        && (!('source' in data) || (data.source is string && data.source.size() <= 64))
         && data.createdAt is timestamp
         && data.updatedAt is timestamp;
     }
@@ -69,7 +112,7 @@ service cloud.firestore {
         && isValidUser(incoming(), userId)
         && incoming().id == existing().id
         && incoming().createdAt == existing().createdAt
-        && incoming().diff(existing()).affectedKeys().hasOnly(['email']);
+        && incoming().diff(existing()).affectedKeys().hasOnly(['email', 'displayName', 'photoURL', 'lastLoginAt']);
       allow delete: if isOwner(userId) && isValidId(userId);
 
       match /sessions/{sessionId} {
@@ -87,8 +130,46 @@ service cloud.firestore {
           && incoming().userId == existing().userId
           && incoming().createdAt == existing().createdAt
           && incoming().updatedAt == request.time
-          && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'decisionsJson', 'itemCount', 'approvedCount', 'updatedAt']);
+          && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'decisionsJson', 'itemCount', 'approvedCount', 'fileName', 'recordsJson', 'currentStep', 'updatedAt']);
         allow delete: if isOwner(userId) && isValidId(sessionId);
+      }
+
+      match /brandLogos/{logoId} {
+        allow get: if isOwner(userId) && isValidId(logoId);
+        allow list: if isOwner(userId);
+        allow create: if isOwner(userId)
+          && isValidId(logoId)
+          && isValidBrandLogo(incoming(), userId, logoId)
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time;
+        allow update: if isOwner(userId)
+          && isValidId(logoId)
+          && isValidBrandLogo(incoming(), userId, logoId)
+          && incoming().id == existing().id
+          && incoming().userId == existing().userId
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && incoming().diff(existing()).affectedKeys().hasOnly(['brandName', 'brandKey', 'imageDataUrl', 'width', 'height', 'updatedAt']);
+        allow delete: if isOwner(userId) && isValidId(logoId);
+      }
+
+      match /masterItems/{itemId} {
+        allow get: if isOwner(userId) && isValidId(itemId);
+        allow list: if isOwner(userId);
+        allow create: if isOwner(userId)
+          && isValidId(itemId)
+          && isValidMasterItem(incoming(), userId, itemId)
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time;
+        allow update: if isOwner(userId)
+          && isValidId(itemId)
+          && isValidMasterItem(incoming(), userId, itemId)
+          && incoming().id == existing().id
+          && incoming().userId == existing().userId
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && incoming().diff(existing()).affectedKeys().hasOnly(['barcode', 'name', 'category', 'price', 'size', 'brand', 'sku', 'notes', 'source', 'updatedAt']);
+        allow delete: if isOwner(userId) && isValidId(itemId);
       }
     }
   }

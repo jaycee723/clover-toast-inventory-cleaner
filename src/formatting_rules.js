@@ -26,9 +26,9 @@ export function generateRuleBasedFormatting(prompt, items) {
     // Volume / Size standardization (e.g. 11oz, 1 L, 750ml)
     if (p.includes('bottle') || p.includes('volume') || p.includes('size') || p.includes('ml') || p.includes('liter') || p.includes('standard') || p.includes('oz')) {
       const volNormalized = newName
-        .replace(/(\d+)\s*([mM][lL])\b/g, '$1ml')
-        .replace(/(\d+(?:\.\d+)?)\s*([lL]|[lL][tT][rR])\b/g, '$1 L')
-        .replace(/(\d+)\s*([oO][zZ])\b/g, '$1oz');
+        .replace(/\b(\d+)\s*ml\b/gi, '$1ml')
+        .replace(/\b(\d+(?:\.\d+)?)\s*l(?:tr)?\b/gi, '$1 L')
+        .replace(/\b(\d+)\s*oz\b/gi, '$1oz');
       if (volNormalized !== newName) {
         newName = volNormalized;
         reasons.push('Standardized bottle volume notation (e.g. 11oz, 1 L)');
@@ -38,21 +38,29 @@ export function generateRuleBasedFormatting(prompt, items) {
     // Pack standardization
     if (p.includes('pack') || p.includes('pk') || p.includes('can') || p.includes('beer')) {
       const packNormalized = newName
-        .replace(/(\d+)\s*(?:[pP][kK]|[pP][aA][cC][kK])\b/g, '$1-Pack')
-        .replace(/(\d+)\s*(?:[bB][tT][lL]|[bB][oO][tT][tT][lL][eE][sS]?)\b/gi, '$1-Bottle');
+        .replace(/\b(\d+)\s*(?:pack|pk)\b/gi, '$1-Pack')
+        .replace(/\b(\d+)\s*(?:bottles?|btl)\b/gi, '$1-Bottle');
       if (packNormalized !== newName) {
         newName = packNormalized;
         reasons.push('Standardized multi-pack specification');
       }
     }
 
-    // Suffix ordering: move volume or pack to end if requested
+    // Suffix ordering: move volume or pack to end if requested (linear match without polynomial backtracking)
     if (p.includes('end') && (p.includes('volume') || p.includes('size'))) {
-      const volMatch = newName.match(/\b(\d+(?:\.\d+)?\s*(?:ml|mL|L|oz))\b/i);
-      if (volMatch && !newName.trim().endsWith(volMatch[1])) {
-        const cleaned = newName.replace(volMatch[0], '').replace(/\s+/g, ' ').trim();
-        newName = `${cleaned} ${volMatch[1]}`;
-        reasons.push('Moved volume suffix to end of product title');
+      const volMatch = newName.match(/\b(\d+(?:\.\d+)?)\s*(ml|l|oz)\b/i);
+      if (volMatch && volMatch.index !== undefined) {
+        const fullMatch = volMatch[0];
+        const unit = volMatch[2].toLowerCase() === 'l' ? 'L' : volMatch[2].toLowerCase();
+        const formattedSuffix = `${volMatch[1]}${unit === 'L' ? ' L' : unit}`;
+        if (!newName.trim().endsWith(fullMatch) && !newName.trim().endsWith(formattedSuffix)) {
+          const idx = volMatch.index;
+          const before = newName.slice(0, idx);
+          const after = newName.slice(idx + fullMatch.length);
+          const cleaned = `${before} ${after}`.replace(/\s+/g, ' ').trim();
+          newName = `${cleaned} ${formattedSuffix}`;
+          reasons.push('Moved volume suffix to end of product title');
+        }
       }
     }
 

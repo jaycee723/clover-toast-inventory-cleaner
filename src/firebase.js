@@ -76,8 +76,6 @@ if (typeof window !== 'undefined') {
   testConnection();
 }
 
-import { WORKSPACE_SCOPES } from './workspace.js';
-
 let cachedAccessToken = null;
 
 export function getAccessToken() {
@@ -86,9 +84,7 @@ export function getAccessToken() {
 
 export async function signInWithGoogle() {
   const provider = new GoogleAuthProvider();
-  for (const s of WORKSPACE_SCOPES) {
-    provider.addScope(s);
-  }
+  // Standard Google OAuth sign-in without unverified Workspace scopes so login succeeds reliably
   provider.setCustomParameters({ prompt: 'select_account' });
   const cred = await signInWithPopup(auth, provider);
   const credential = GoogleAuthProvider.credentialFromResult(cred);
@@ -100,13 +96,17 @@ export async function signInWithGoogle() {
     const userRef = doc(db, 'users', user.uid);
     try {
       const snap = await getDoc(userRef);
+      const userPayload = {
+        id: user.uid,
+        email: user.email || '',
+        displayName: user.displayName || '',
+        photoURL: user.photoURL || '',
+        lastLoginAt: serverTimestamp(),
+      };
       if (!snap.exists()) {
-        await setDoc(userRef, {
-          id: user.uid,
-          email: user.email || '',
-          createdAt: serverTimestamp(),
-        });
+        userPayload.createdAt = serverTimestamp();
       }
+      await setDoc(userRef, userPayload, { merge: true });
     } catch (err) {
       console.warn('User profile initial sync notice:', err);
     }
@@ -123,27 +123,85 @@ export function onAuthChange(callback) {
   return onAuthStateChanged(auth, callback);
 }
 
-export async function saveCloudSession(name, sessionPayload, itemCount = 0, approvedCount = 0) {
+export async function saveCloudSession(nameOrOptions, sessionPayload, itemCount = 0, approvedCount = 0) {
   if (!auth.currentUser) throw new Error('Please sign in to save sessions to the cloud');
   const userId = auth.currentUser.uid;
-  const safeName = (name || `Session ${new Date().toLocaleDateString()}`).trim().slice(0, 128);
-  const sessionId = 'sess_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 6);
+
+  let name = '';
+  let decisionsJson = '';
+  let recordsJson = '';
+  let fileName = '';
+  let currentStep = 1;
+  let items = 0;
+  let approved = 0;
+  let customId = null;
+
+  if (typeof nameOrOptions === 'object' && nameOrOptions !== null) {
+    name = nameOrOptions.name || '';
+    decisionsJson = typeof nameOrOptions.decisionsJson === 'string'
+      ? nameOrOptions.decisionsJson
+      : JSON.stringify(nameOrOptions.decisionsJson || {});
+    recordsJson = typeof nameOrOptions.recordsJson === 'string'
+      ? nameOrOptions.recordsJson
+      : (nameOrOptions.recordsJson ? JSON.stringify(nameOrOptions.recordsJson) : '');
+    fileName = nameOrOptions.fileName || '';
+    currentStep = Number(nameOrOptions.currentStep) || 1;
+    items = Number(nameOrOptions.itemCount) || 0;
+    approved = Number(nameOrOptions.approvedCount) || 0;
+    customId = nameOrOptions.id || null;
+  } else {
+    name = nameOrOptions || '';
+    decisionsJson = typeof sessionPayload === 'string'
+      ? sessionPayload
+      : JSON.stringify(sessionPayload || {});
+    items = Number(itemCount) || 0;
+    approved = Number(approvedCount) || 0;
+  }
+
+  function generateSecureId(prefix = 'sess') {
+    if (typeof crypto !== 'undefined') {
+      if (typeof crypto.randomUUID === 'function') {
+        return `${prefix}_${crypto.randomUUID().replace(/-/g, '').slice(0, 16)}`;
+      }
+      if (typeof crypto.getRandomValues === 'function') {
+        const bytes = new Uint8Array(6);
+        crypto.getRandomValues(bytes);
+        const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+        return `${prefix}_${Date.now().toString(36)}_${hex}`;
+      }
+    }
+    return `${prefix}_${Date.now().toString(36)}_${Date.now().toString(16).slice(-6)}`;
+  }
+
+  const safeName = (name || `Inventory ${new Date().toLocaleDateString()}`).trim().slice(0, 128);
+  const sessionId = customId || generateSecureId('sess');
   const sessionPath = `users/${userId}/sessions/${sessionId}`;
 
   const payload = {
     id: sessionId,
     userId,
     name: safeName,
-    decisionsJson: typeof sessionPayload === 'string' ? sessionPayload : JSON.stringify(sessionPayload),
-    itemCount: Number(itemCount) || 0,
-    approvedCount: Number(approvedCount) || 0,
+    decisionsJson,
+    itemCount: items,
+    approvedCount: approved,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   };
 
+  if (fileName) {
+    payload.fileName = fileName.slice(0, 255);
+  }
+  // Max length enforced in firestore.rules is 750,000 characters
+  if (recordsJson && recordsJson.length <= 750000) {
+    payload.recordsJson = recordsJson;
+  }
+  if (currentStep) {
+    payload.currentStep = currentStep;
+  }
+
   try {
-    await setDoc(doc(db, 'users', userId, 'sessions', sessionId), payload);
-    return { id: sessionId, name: safeName };
+    await setDoc(doc(db, 'users', userId, 'sessions', sessionId), payload, { merge: true });
+    return { id: sessionId, name: safeName, updatedAt: new Date() };
   } catch (err) {
     handleFirestoreError(err, OperationType.CREATE, sessionPath);
   }

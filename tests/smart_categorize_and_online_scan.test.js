@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { isGenericCategory, smartCategorizeInventory, GENERIC_CATEGORIES } from '../src/categories.js';
+import { isGenericCategory, smartCategorizeInventory, GENERIC_CATEGORIES, streamlineCategory } from '../src/categories.js';
 import { applySingleAiChange, revertSingleAiChange } from '../src/ai_assistant.js';
 import { isApproved } from '../src/review.js';
 
@@ -164,4 +164,37 @@ test('applySingleAiChange applies change to individual item and revertSingleAiCh
   assert.equal(rows[0].current_name, 'CORONA EXTRA 12PK');
   assert.equal(records[0].name, 'CORONA EXTRA 12PK');
   assert.equal(rows[0].geminiCorrected, false);
+});
+
+test('streamlineCategory simplifies complex categories into clean Toast departments', () => {
+  assert.equal(streamlineCategory('Spirits - Vodka 750ml'), 'LIQUOR/SPIRITS');
+  assert.equal(streamlineCategory('Craft Beer - IPA 6-Pack'), 'BEER');
+  assert.equal(streamlineCategory('Red Wine / Cabernet Sauvignon'), 'WINE');
+  assert.equal(streamlineCategory('Clover Hard Seltzer / RTD'), 'RTD (READY TO DRINK)');
+  assert.equal(streamlineCategory('Potato Chips & Candy Bar'), 'CANDY/SNACKS');
+  assert.equal(streamlineCategory('Energy Drink & Soda Mixer'), 'DRINKS');
+  assert.equal(streamlineCategory('Marlboro Cigarettes Box'), 'TOBACCO PRODUCTS');
+  assert.equal(streamlineCategory('Disposable Vape Device'), 'VAPES');
+  assert.equal(streamlineCategory('General Retail'), null); // Generic category ignored
+});
+
+test('applySingleAiChange strictly rejects price modifications and leaves price untouched', () => {
+  const records = [{ id: '1', name: 'TITOS VODKA', price: '24.99' }];
+  const rows = [{ id: 'r1', current_name: 'TITOS VODKA', price: '24.99', decisions: { price: 'pending' } }];
+
+  const roguePriceChange = {
+    id: 'r1',
+    field: 'price',
+    originalValue: '24.99',
+    proposedValue: '29.99',
+    reason: 'Price adjustment'
+  };
+
+  const res = applySingleAiChange(records, rows, roguePriceChange);
+  assert.equal(res.success, false);
+  assert.match(res.error, /pricing/i);
+
+  // Prices remain untouched
+  assert.equal(rows[0].price, '24.99');
+  assert.equal(records[0].price, '24.99');
 });

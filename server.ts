@@ -98,17 +98,16 @@ app.post('/api/ai/format', async (req, res) => {
     const systemInstruction = `You are an expert retail & liquor store inventory formatting and POS standardization assistant (specializing in Clover and Toast POS catalog transformations).
 Your task is to analyze inventory items and produce structured modifications based on the user's formatting request.
 
-Common user requests include:
-- Brand title casing (e.g. 'CORONA EXTRA 12PK' -> 'Corona Extra 12 Pack')
-- Standardizing bottle volumes and package units (e.g. '750ML' -> '750ml', '1.75 L' -> '1.75 L', '11 OZ' -> '11oz', '6PK' -> '6-Pack')
-- Moving bottle sizes or pack specifications to the end of the item name
-- Standardizing categories (e.g., 'Beer', 'Wine', 'Spirits', 'Non-Alcoholic')
-- Removing messy POS suffixes or fixing pricing formatting
-- Barcode leading zero or check adjustments
+CRITICAL POLICY & BOUNDARIES:
+1. FORMATTING RULES MUST NOT TOUCH PRICING. Under no circumstances should pricing ever be proposed, changed, or touched. Pricing is authoritative store data.
+2. FORMATTING RULES MUST ONLY FIX:
+   - ITEM NAME ('name'): Uniform Title Case brand naming, standardizing bottle volumes ('11oz', '12oz', '750ml', '1 L', '1.75 L'), standardizing packs ('6-Pack', '12-Pack', '24-Pack'), and removing messy POS abbreviations.
+   - CATEGORY ('category'): Streamline and simplify categories into clean Toast retail departments ('LIQUOR/SPIRITS', 'BEER', 'WINE', 'RTD (READY TO DRINK)', 'CANDY/SNACKS', 'DRINKS', 'TOBACCO PRODUCTS', 'VAPES', 'Smoke Shop').
+   - UPC / BARCODE ('barcode'): Clean non-digits or pad 11-digit UPCs to 12-digit UPC-A with leading zeros.
 
 Guidelines:
 1. ONLY propose changes for items that actually require adjustments per the user's instruction.
-2. For each change, specify the exact item 'id', 'field' ('name', 'category', 'price', or 'barcode'), 'originalValue', 'proposedValue', and a clear, concise 'reason'.
+2. For each change, specify the exact item 'id', 'field' ('name', 'category', or 'barcode' ONLY - NEVER 'price'), 'originalValue', 'proposedValue', and a clear, concise 'reason'.
 3. In 'message', provide a conversational, helpful overview of the changes made.
 4. In 'summary', provide a 1-sentence summary (e.g., 'Standardized 18 liquor bottle sizes and title casing.').
 5. If no items require changes, return an empty 'changes' array with an explanatory message.`;
@@ -135,7 +134,7 @@ ${JSON.stringify(sampleItems, null, 2)}`;
                 type: Type.OBJECT,
                 properties: {
                   id: { type: Type.STRING },
-                  field: { type: Type.STRING },
+                  field: { type: Type.STRING, enum: ['name', 'category', 'barcode'] },
                   originalValue: { type: Type.STRING },
                   proposedValue: { type: Type.STRING },
                   reason: { type: Type.STRING }
@@ -150,20 +149,27 @@ ${JSON.stringify(sampleItems, null, 2)}`;
     });
 
     const parsed = JSON.parse(response.text?.trim() || '{}');
+    const safeChanges = (Array.isArray(parsed.changes) ? parsed.changes : []).filter(
+      (c: any) => c && (c.field === 'name' || c.field === 'category' || c.field === 'barcode') && c.field !== 'price'
+    );
+
     return res.json({
       ok: true,
       message: parsed.message || 'Formatting proposals generated.',
-      summary: parsed.summary || `Proposed adjustments for ${parsed.changes?.length || 0} items.`,
-      changes: Array.isArray(parsed.changes) ? parsed.changes : []
+      summary: parsed.summary || `Proposed adjustments for ${safeChanges.length} items (Name, Category, and UPC only).`,
+      changes: safeChanges
     });
   } catch (err: any) {
     console.log('[AI Info] Using local retail formatter engine.');
     const fallback = generateRuleBasedFormatting(req.body.prompt, req.body.items || []);
+    const safeFallbackChanges = (fallback.changes || []).filter(
+      (c: any) => c && (c.field === 'name' || c.field === 'category' || c.field === 'barcode') && c.field !== 'price'
+    );
     return res.json({
       ok: true,
-      message: `${fallback.message} (Applied via intelligent retail formatter)`,
+      message: `${fallback.message} (Applied via intelligent retail formatter; pricing protected)`,
       summary: fallback.summary,
-      changes: fallback.changes
+      changes: safeFallbackChanges
     });
   }
 });
@@ -270,13 +276,13 @@ app.post('/api/ai/online-search-scan', async (req, res) => {
 
     const systemInstruction = `You are an expert retail & liquor store inventory catalog specialist connected to real-time Google Search.
 You are performing a comprehensive online product scan on unapproved store inventory items being prepared for Toast POS.
-For each unapproved item:
-1. Verify the authentic manufacturer/brand name, correct casing (Title Case brand names like "Jack Daniel's", "Corona Extra", "High Noon", "Tito's Handmade Vodka"), and proper spacing.
-2. Standardize packaging and volume units to standard retail rules:
-   - Volume: "750 mL", "1 L", "1.75 L", "12 oz", "11oz" (capitalize 'L' for liters, lowercase 'oz', 'mL').
-   - Packs: "6-Pack", "12-Pack", "24-Pack", "Single".
-3. Assign an authentic retail department/category (e.g. 'LIQUOR/SPIRITS', 'BEER', 'WINE', 'CANDY/SNACKS', 'TOBACCO PRODUCTS', 'VAPES', 'DRINKS').
-4. If an item name contains cryptic POS shorthand or truncated words, expand them accurately using your online product knowledge.
+
+CRITICAL POLICY & BOUNDARIES:
+1. ONLINE SEARCH SCANS AND FORMATTING RULES MUST NEVER TOUCH PRICING. Under no circumstances should pricing ever be proposed, modified, or touched.
+2. ONLY PROPOSE CORRECTIONS FOR:
+   - ITEM NAME ('name'): Uniform Title Case brand naming (e.g. "Jack Daniel's", "Corona Extra", "High Noon", "Tito's Handmade Vodka"), standardizing packaging & volume units ("11oz", "12oz", "750 mL", "1 L", "1.75 L", "6-Pack", "12-Pack"), and expanding POS shorthand based on live product search.
+   - CATEGORY ('category'): Streamline and simplify categories into clean retail departments ('LIQUOR/SPIRITS', 'BEER', 'WINE', 'RTD (READY TO DRINK)', 'CANDY/SNACKS', 'DRINKS', 'TOBACCO PRODUCTS', 'VAPES', 'Smoke Shop').
+   - UPC / BARCODE ('barcode'): Pad 11-digit UPCs or clean non-numeric characters. NEVER propose changes to 'price'.
 
 Rules:
 - ONLY propose changes for items where corrections are genuinely needed.
@@ -286,7 +292,7 @@ Rules:
   - "corrections": An array of objects with:
       - "id": The item's id
       - "itemName": The item's name
-      - "field": 'name' | 'category' | 'barcode' | 'price'
+      - "field": 'name' | 'category' | 'barcode' (NEVER 'price')
       - "originalValue": The current value
       - "proposedValue": The corrected value
       - "reason": Clear rationale based on product search and retail standards.`;
@@ -313,7 +319,7 @@ ${JSON.stringify(itemsToScan, null, 2)}`;
                 properties: {
                   id: { type: Type.STRING },
                   itemName: { type: Type.STRING },
-                  field: { type: Type.STRING },
+                  field: { type: Type.STRING, enum: ['name', 'category', 'barcode'] },
                   originalValue: { type: Type.STRING },
                   proposedValue: { type: Type.STRING },
                   reason: { type: Type.STRING }
@@ -328,11 +334,15 @@ ${JSON.stringify(itemsToScan, null, 2)}`;
     });
 
     const parsed = JSON.parse(response.text?.trim() || '{}');
+    const safeCorrections = (Array.isArray(parsed.corrections) ? parsed.corrections : []).filter(
+      (c: any) => c && (c.field === 'name' || c.field === 'category' || c.field === 'barcode') && c.field !== 'price'
+    );
+
     return res.json({
       ok: true,
       message: parsed.message || 'Online search scan complete.',
-      summary: parsed.summary || `Found corrections for ${parsed.corrections?.length || 0} unapproved items.`,
-      corrections: Array.isArray(parsed.corrections) ? parsed.corrections : []
+      summary: parsed.summary || `Found corrections for ${safeCorrections.length} unapproved items (Item Name, Category, and UPC only).`,
+      corrections: safeCorrections
     });
   } catch (err: any) {
     console.log('[AI Info] Using domain catalog engine for unapproved items scan.');

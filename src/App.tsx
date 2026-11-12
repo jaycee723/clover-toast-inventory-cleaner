@@ -1,7 +1,16 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { toCsv, parseCsv } from './csv.js';
 import { parseInventoryFile } from './xlsx.js';
 import { parseReferenceCsv, buildReferenceIndex, referenceTemplateCsv } from './reference.js';
+import {
+  AVERY_TEMPLATES,
+  extractBrandFromItem,
+  extractSizeFromItem,
+  generateBarcodeSvg,
+  formatTagPrice,
+  paginateAveryLabels,
+  exportAveryCsv
+} from './avery_labels.js';
 import {
   buildRows,
   setDecision,
@@ -121,6 +130,8 @@ export function App() {
     brandsTitleCased: number;
     packsNormalized: number;
     barcodesPadded: number;
+    categoriesStreamlined?: number;
+    onlineSearchChecked?: number;
     totalToastReady: number;
   } | null>(null);
 
@@ -168,6 +179,19 @@ export function App() {
     applied: boolean;
     undoRecord?: any;
   }>>([]);
+
+  // Avery Price Tag & Label Studio State
+  const [isAveryModalOpen, setIsAveryModalOpen] = useState<boolean>(false);
+  const [averyTemplateId, setAveryTemplateId] = useState<string>('5160');
+  const [averyBrandFilter, setAveryBrandFilter] = useState<string>('all');
+  const [averyCategoryFilter, setAveryCategoryFilter] = useState<string>('all');
+  const [averySearch, setAverySearch] = useState<string>('');
+  const [averySelectedIds, setAverySelectedIds] = useState<Set<string>>(new Set());
+  const [averyCopies, setAveryCopies] = useState<number>(1);
+  const [averyStartPosition, setAveryStartPosition] = useState<number>(1);
+  const [averyShowBarcode, setAveryShowBarcode] = useState<boolean>(true);
+  const [averyShowStoreName, setAveryShowStoreName] = useState<boolean>(true);
+  const [averyStoreName, setAveryStoreName] = useState<string>('777 Liquor Store');
 
   // Auth & Cloud State
   const [currentUser, setCurrentUser] = useState<any>(null);
@@ -295,11 +319,18 @@ export function App() {
   };
 
   // 2. Step 2: 1-Click Smart Clean
-  const handleRunSmartClean = () => {
+  const handleRunSmartClean = async () => {
     if (!records.length) {
       setStatusText('Please load an inventory file in Step 1 first.');
       return;
     }
+
+    setIsScanningOnline(true);
+    setScanProgress({
+      current: 0,
+      total: records.length,
+      message: 'Running 1-Click Smart Clean: Standardizing uniform brand casing, packaging, and UPC padding...'
+    });
 
     const unitsRules = SPELLCHECK_PRESETS.units?.rules || [];
     const liquorRules = SPELLCHECK_PRESETS.liquor?.rules || [];
@@ -320,23 +351,77 @@ export function App() {
     // Build rows with updated aliases
     const updatedRows = rebuildCatalog(records, updatedAliases, refs, false);
 
+    // Streamline and simplify categories
+    setScanProgress({
+      current: Math.floor(records.length / 3),
+      total: records.length,
+      message: 'Streamlining and simplifying categories into clean Toast departments...'
+    });
+    const catRes = smartCategorizeInventory(updatedRows, { canonical, autoApply: true });
+
+    // Item name checking against online search
+    setScanProgress({
+      current: Math.floor((records.length * 2) / 3),
+      total: records.length,
+      message: 'Checking item names against online search catalog...'
+    });
+
+    let onlineCheckedCount = 0;
+    try {
+      const unapprovedOrFlagged = updatedRows.filter((r) => !isApproved(r) || (r.issues && r.issues.length > 0));
+      const itemsToCheck = (unapprovedOrFlagged.length > 0 ? unapprovedOrFlagged : updatedRows).slice(0, 50);
+
+      const payload = {
+        items: itemsToCheck.map((r) => ({
+          id: r.id,
+          name: r.current_name || r.original_name,
+          barcode: r.barcode?.original || '',
+          category: r.category || '',
+          price: r.price || '',
+          issues: issues(r)
+        }))
+      };
+
+      const res = await fetch('/api/ai/online-search-scan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      if (data.corrections && Array.isArray(data.corrections)) {
+        for (const corr of data.corrections) {
+          // STRICT SAFETY: Do NOT touch pricing
+          if (corr.field === 'price') continue;
+          const applyRes = applySingleAiChange(records, updatedRows, corr);
+          if (applyRes.success) onlineCheckedCount++;
+        }
+      }
+    } catch (err: any) {
+      console.warn('Online search item name check note:', err.message);
+    }
+
     // Accept clean barcodes
     acceptCleanBarcodes(updatedRows);
 
     // Auto-approve safe proposals
     const { approvedNames } = autoApproveSafeProposals(updatedRows);
+    autoApproveHighCertainty(updatedRows);
 
     setRows([...updatedRows]);
+    setIsScanningOnline(false);
+    setScanProgress(null);
 
     const readyToast = updatedRows.filter(isApproved).length;
     setScorecard({
       brandsTitleCased: approvedNames,
       packsNormalized: combined.length,
       barcodesPadded: padRes.paddedCount,
+      categoriesStreamlined: catRes.improvedCount,
+      onlineSearchChecked: onlineCheckedCount,
       totalToastReady: readyToast
     });
 
-    postAnnouncement(`🚀 Smart Clean Complete! Standardized packaging rules, auto-padded ${padRes.paddedCount} barcodes to 13 digits, and validated ${readyToast} items ready for Toast POS!`);
+    postAnnouncement(`🚀 Smart Clean Complete! Uniform brand casing & packaging rules applied, auto-padded ${padRes.paddedCount} barcodes, streamlined ${catRes.improvedCount} categories, checked names via online search (${onlineCheckedCount} verified), and validated ${readyToast} items ready for Toast POS! (Pricing 100% protected).`);
   };
 
   // 3. Step 3: Interactive Row Editing & Approvals
@@ -387,11 +472,18 @@ export function App() {
   };
 
   // Express 1-Click Full Clean (Zero-friction few-clicks experience)
-  const handleInstantFullCleanAndExport = () => {
+  const handleInstantFullCleanAndExport = async () => {
     if (!records.length) {
       setStatusText('Please load an inventory file in Step 1 first.');
       return;
     }
+
+    setIsScanningOnline(true);
+    setScanProgress({
+      current: 0,
+      total: records.length,
+      message: 'Running 1-Click Auto Fix: Normalizing item names, brand casing, and packaging...'
+    });
 
     const unitsRules = SPELLCHECK_PRESETS.units?.rules || [];
     const liquorRules = SPELLCHECK_PRESETS.liquor?.rules || [];
@@ -413,7 +505,53 @@ export function App() {
     const updatedRows = rebuildCatalog(records, updatedAliases, refs, false);
 
     // Smart Categorize missing or generic categories
+    setScanProgress({
+      current: Math.floor(records.length / 3),
+      total: records.length,
+      message: 'Streamlining and simplifying categories into clean Toast departments...'
+    });
     const catRes = smartCategorizeInventory(updatedRows, { canonical, autoApply: true });
+
+    // Item name checking against online search / live catalog scan
+    setScanProgress({
+      current: Math.floor((records.length * 2) / 3),
+      total: records.length,
+      message: 'Checking item names against online search catalog...'
+    });
+
+    let onlineCheckedCount = 0;
+    try {
+      const unapprovedOrFlagged = updatedRows.filter((r) => !isApproved(r) || (r.issues && r.issues.length > 0));
+      const itemsToCheck = (unapprovedOrFlagged.length > 0 ? unapprovedOrFlagged : updatedRows).slice(0, 50);
+
+      const payload = {
+        items: itemsToCheck.map((r) => ({
+          id: r.id,
+          name: r.current_name || r.original_name,
+          barcode: r.barcode?.original || '',
+          category: r.category || '',
+          price: r.price || '',
+          issues: issues(r)
+        }))
+      };
+
+      const res = await fetch('/api/ai/online-search-scan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      if (data.corrections && Array.isArray(data.corrections)) {
+        for (const corr of data.corrections) {
+          // STRICT SAFETY: Do NOT touch pricing under any circumstances
+          if (corr.field === 'price') continue;
+          const applyRes = applySingleAiChange(records, updatedRows, corr);
+          if (applyRes.success) onlineCheckedCount++;
+        }
+      }
+    } catch (err: any) {
+      console.warn('Online search item name check note:', err.message);
+    }
 
     // Accept clean barcodes & safe proposals
     acceptCleanBarcodes(updatedRows);
@@ -421,17 +559,21 @@ export function App() {
     autoApproveHighCertainty(updatedRows);
 
     setRows([...updatedRows]);
+    setIsScanningOnline(false);
+    setScanProgress(null);
 
     const readyToast = updatedRows.filter(isApproved).length;
     setScorecard({
       brandsTitleCased: updatedRows.length,
       packsNormalized: combined.length,
       barcodesPadded: padRes.paddedCount,
+      categoriesStreamlined: catRes.improvedCount,
+      onlineSearchChecked: onlineCheckedCount,
       totalToastReady: readyToast
     });
 
     setCurrentStep(4);
-    postAnnouncement(`🚀 1-Click Clean Complete! Standardized packaging & casing, padded ${padRes.paddedCount} barcodes, smart-categorized ${catRes.improvedCount} items, and validated ${readyToast} items ready for Toast POS!`);
+    postAnnouncement(`🚀 1-Click Clean Complete! Uniform brand casing & packaging rules applied, padded ${padRes.paddedCount} barcodes, streamlined ${catRes.improvedCount} categories, checked names via online search (${onlineCheckedCount} verified), and validated ${readyToast} items ready for Toast POS! (Pricing 100% protected).`);
     openToastPreview('retail');
   };
 
@@ -712,6 +854,129 @@ export function App() {
     }
   };
 
+  // Avery Price Tag & Shelf Label Studio Computations
+  const averyAllItems = useMemo(() => {
+    return rows.map((r) => {
+      const name = r.current_name || r.clean?.name || r.raw?.['Item Name'] || r.name || '';
+      const barcode = r.barcode?.original || r.barcode?.padded || r.identity?.barcode || r.clean?.barcode || '';
+      const price = r.price !== undefined ? r.price : (r.raw?.Price !== undefined ? r.raw.Price : 0);
+      const category = r.category || r.clean?.category || r.raw?.Category || 'General';
+      const brand = extractBrandFromItem(name);
+      const size = extractSizeFromItem(name);
+      return {
+        id: String(r.id),
+        name,
+        price,
+        barcode,
+        category,
+        brand,
+        size
+      };
+    });
+  }, [rows]);
+
+  const averyAvailableBrands = useMemo(() => {
+    const set = new Set<string>();
+    averyAllItems.forEach((i) => {
+      if (i.brand) set.add(i.brand);
+    });
+    return Array.from(set).sort();
+  }, [averyAllItems]);
+
+  const averyAvailableCategories = useMemo(() => {
+    const set = new Set<string>();
+    averyAllItems.forEach((i) => {
+      if (i.category) set.add(i.category);
+    });
+    return Array.from(set).sort();
+  }, [averyAllItems]);
+
+  const averyFilteredItems = useMemo(() => {
+    return averyAllItems.filter((item) => {
+      if (averyBrandFilter !== 'all' && item.brand !== averyBrandFilter) return false;
+      if (averyCategoryFilter !== 'all' && item.category !== averyCategoryFilter) return false;
+      if (averySearch.trim()) {
+        const q = averySearch.trim().toLowerCase();
+        const inName = item.name.toLowerCase().includes(q);
+        const inBarcode = item.barcode.toLowerCase().includes(q);
+        const inCat = item.category.toLowerCase().includes(q);
+        if (!inName && !inBarcode && !inCat) return false;
+      }
+      return true;
+    });
+  }, [averyAllItems, averyBrandFilter, averyCategoryFilter, averySearch]);
+
+  const selectedTemplate = useMemo(() => {
+    return AVERY_TEMPLATES.find((t) => t.id === averyTemplateId) || AVERY_TEMPLATES[0];
+  }, [averyTemplateId]);
+
+  const averyItemsToPrint = useMemo(() => {
+    if (averySelectedIds.size === 0) {
+      return averyFilteredItems;
+    }
+    return averyFilteredItems.filter((item) => averySelectedIds.has(item.id));
+  }, [averyFilteredItems, averySelectedIds]);
+
+  const averyPagination = useMemo(() => {
+    return paginateAveryLabels(averyItemsToPrint, selectedTemplate, averyStartPosition, averyCopies);
+  }, [averyItemsToPrint, selectedTemplate, averyStartPosition, averyCopies]);
+
+  const openAveryModal = () => {
+    if (rows.length === 0) {
+      setStatusText('Please load or clean an inventory file first to print price tags.');
+      return;
+    }
+    if (averySelectedIds.size === 0) {
+      setAverySelectedIds(new Set(rows.map((r) => String(r.id))));
+    }
+    setIsAveryModalOpen(true);
+  };
+
+  const handlePrintAverySheets = () => {
+    window.print();
+  };
+
+  const handleExportAveryCsvFile = () => {
+    const items = averyItemsToPrint;
+    if (items.length === 0) {
+      setStatusText('No items selected for Avery label export.');
+      return;
+    }
+    const csvContent = exportAveryCsv(items, averyStoreName);
+    const dateStr = new Date().toISOString().slice(0, 10);
+    const filename = `avery_${averyTemplateId}_price_tags_${dateStr}.csv`;
+    downloadFile(filename, csvContent);
+    postAnnouncement(`🏷️ Exported ${items.length} price tags formatted for Avery ${averyTemplateId} Design & Print!`);
+  };
+
+  const handleToggleAveryItem = (id: string) => {
+    setAverySelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+
+  const handleSelectAllFilteredAvery = () => {
+    setAverySelectedIds((prev) => {
+      const next = new Set(prev);
+      averyFilteredItems.forEach((item) => next.add(item.id));
+      return next;
+    });
+  };
+
+  const handleDeselectAllFilteredAvery = () => {
+    setAverySelectedIds((prev) => {
+      const next = new Set(prev);
+      averyFilteredItems.forEach((item) => next.delete(item.id));
+      return next;
+    });
+  };
+
   // Gemini AI Assistant Chat & Format Execution
   const handleSendAiPrompt = async (promptToSend?: string) => {
     const prompt = (promptToSend || aiChatInput).trim();
@@ -882,6 +1147,15 @@ export function App() {
           >
             <span>✨ Gemini Copilot</span>
             <span className="ai-badge">Flash 3.8</span>
+          </button>
+          <button
+            type="button"
+            className="btn-toast btn-sm"
+            style={{ background: '#7c3aed', color: '#ffffff' }}
+            onClick={openAveryModal}
+            title="Open Avery Price Tag & Shelf Label Studio"
+          >
+            <span>🏷️ Print Price Tags (Avery)</span>
           </button>
           <span className="status-pill">
             {currentUser ? `Signed in: ${currentUser.email || currentUser.displayName || currentUser.uid}` : 'Not signed in'}
@@ -1082,8 +1356,8 @@ export function App() {
                         <span>⚡ Express 1-Click Clean &amp; Toast Ready</span>
                         <span className="app-title-badge">Fastest Path</span>
                       </div>
-                      <p style={{ color: '#cbd5e1', fontSize: 13, margin: '6px 0 0 0', maxWidth: 560 }}>
-                        Single click runs full packaging normalization (<code>11 oz</code>, <code>1 L</code>), auto-pads barcodes to 13 digits, smart-categorizes items, and opens the validated Toast import file.
+                      <p style={{ color: '#cbd5e1', fontSize: 13, margin: '6px 0 0 0', maxWidth: 580 }}>
+                        Single click runs uniform brand casing, standardizes packaging (<code>11 oz</code>, <code>1 L</code>), streamlines categories into clean departments, checks item names against online search, and auto-pads UPCs. <strong>Pricing is 100% preserved.</strong>
                       </p>
                     </div>
                     <div className="flex-wrap" style={{ gap: 10 }}>
@@ -1092,8 +1366,9 @@ export function App() {
                         className="btn-toast"
                         style={{ padding: '12px 20px', fontSize: 15, background: '#16a34a' }}
                         onClick={handleInstantFullCleanAndExport}
+                        disabled={isScanningOnline}
                       >
-                        <span>🚀 1-Click Clean &amp; Download Toast File</span>
+                        <span>{isScanningOnline ? '⏳ Running 1-Click Clean...' : '🚀 1-Click Clean & Download Toast File'}</span>
                       </button>
                       <button
                         type="button"
@@ -1119,7 +1394,7 @@ export function App() {
                   <span>⚡ Step 2: Auto-Clean &amp; Standardize Entire Catalog</span>
                 </h2>
                 <p className="wizard-pane-desc">
-                  Single-click autopilot normalizes brand casing, standardizes packaging (e.g. <code>12PK</code> → <code>12-Pack</code>, <code>750ML</code> → <code>750 mL</code>), and auto-pads barcodes missing leading zeros to standard 13-digit EANs.
+                  Single-click autopilot normalizes uniform brand casing, packaging (e.g. <code>12PK</code> → <code>12-Pack</code>, <code>750ML</code> → <code>750 mL</code>), streamlines categories, checks names against online product search, and auto-pads barcodes. <strong>Formatting rules strictly fix Name, Category, and UPC only; pricing is never touched.</strong>
                 </p>
               </div>
 
@@ -1128,7 +1403,7 @@ export function App() {
                   <div>
                     <h3 style={{ margin: '0 0 6px 0', fontSize: 17, color: '#ffffff' }}>Run Full Autopilot Normalization</h3>
                     <p style={{ margin: 0, fontSize: 13, color: '#c7d2fe' }}>
-                      Executes industry packaging rules, Title Case brand normalization, and barcode check digit verification across all loaded items.
+                      Executes uniform Title Case naming, simplified retail departments, barcode padding, and live online search name verification.
                     </p>
                   </div>
                   <button
@@ -1136,15 +1411,21 @@ export function App() {
                     className="btn-auto-process"
                     style={{ padding: '12px 24px', fontSize: 15 }}
                     onClick={handleRunSmartClean}
+                    disabled={isScanningOnline}
                   >
-                    <span>🚀 1-Click Smart Clean</span>
+                    <span>{isScanningOnline ? '⏳ Running Smart Clean...' : '🚀 1-Click Smart Clean'}</span>
                   </button>
                 </div>
               </div>
 
               {scorecard && (
                 <div>
-                  <h3 style={{ margin: '0 0 10px 0', fontSize: 15, color: '#cbd5e1' }}>Autopilot Results Scorecard</h3>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, flexWrap: 'wrap', gap: 8 }}>
+                    <h3 style={{ margin: 0, fontSize: 15, color: '#cbd5e1' }}>Autopilot Results Scorecard</h3>
+                    <span style={{ fontSize: 12, color: '#34d399', background: '#064e3b', border: '1px solid #059669', padding: '3px 8px', borderRadius: 6, fontWeight: 600 }}>
+                      🔒 Pricing 100% Preserved &amp; Untouched
+                    </span>
+                  </div>
                   <div className="clean-scorecard-grid">
                     <div className="clean-scorecard-item">
                       <span className="clean-scorecard-label">Brands Title-Cased</span>
@@ -1153,6 +1434,14 @@ export function App() {
                     <div className="clean-scorecard-item">
                       <span className="clean-scorecard-label">Pack Sizes &amp; Volumes</span>
                       <span className="clean-scorecard-value" style={{ color: '#a78bfa' }}>{scorecard.packsNormalized}</span>
+                    </div>
+                    <div className="clean-scorecard-item">
+                      <span className="clean-scorecard-label">Streamlined Categories</span>
+                      <span className="clean-scorecard-value" style={{ color: '#38bdf8' }}>{scorecard.categoriesStreamlined ?? 0}</span>
+                    </div>
+                    <div className="clean-scorecard-item">
+                      <span className="clean-scorecard-label">Online Search Checked</span>
+                      <span className="clean-scorecard-value" style={{ color: '#c084fc' }}>{scorecard.onlineSearchChecked ?? 0}</span>
                     </div>
                     <div className="clean-scorecard-item">
                       <span className="clean-scorecard-label">13-Digit Barcodes Padded</span>
@@ -1230,6 +1519,15 @@ export function App() {
                   </button>
                   <button type="button" className="btn-outline btn-sm" onClick={handleRevertAllStep3}>
                     <span>↩️ Remove All Edits (Reset)</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-toast btn-sm"
+                    style={{ background: '#7c3aed' }}
+                    onClick={openAveryModal}
+                    title="Print Price Tags for shelf or bottles based on Avery label sheet templates"
+                  >
+                    <span>🏷️ Print Price Tags</span>
                   </button>
                 </div>
 
@@ -1477,6 +1775,27 @@ export function App() {
                     </button>
                   </div>
                 </div>
+
+                {/* Card 3: Avery Label Sheet Price Tags */}
+                <div className="export-card" style={{ borderColor: '#7c3aed', background: 'linear-gradient(135deg, rgba(124, 58, 237, 0.12) 0%, rgba(15, 23, 42, 0.8) 100%)' }}>
+                  <div>
+                    <h3 className="export-card-title">
+                      <span>🏷️ Avery Price Tag &amp; Shelf Labels</span>
+                      <span className="app-title-badge" style={{ background: '#7c3aed' }}>Print &amp; PDF</span>
+                    </h3>
+                    <p className="export-card-desc">
+                      Generate retail price tags &amp; bottle labels for <strong>Avery templates (5160, 5163, 5161, 5167, 94220)</strong>. Filter by brand and category, preview authentic sheets with vector barcodes &amp; prices, save PDF or print directly, or export to Avery Design &amp; Print.
+                    </p>
+                  </div>
+                  <div className="flex-wrap" style={{ gap: 8 }}>
+                    <button type="button" className="btn-toast" style={{ background: '#7c3aed' }} onClick={openAveryModal}>
+                      🖨️ Open Avery Label Studio
+                    </button>
+                    <button type="button" className="btn-outline btn-sm" onClick={handleExportAveryCsvFile}>
+                      📥 Export Avery CSV
+                    </button>
+                  </div>
+                </div>
               </div>
 
               {/* Embedded Toast Consultant Guidance Card */}
@@ -1667,7 +1986,7 @@ export function App() {
                 <textarea
                   className="ai-textarea"
                   rows={2}
-                  placeholder="Ask Gemini to format, title-case, or guide you..."
+                  placeholder="Ask Gemini to format name, category, or UPC (pricing is strictly protected)..."
                   value={aiChatInput}
                   onChange={(e) => setAiChatInput(e.target.value)}
                   onKeyDown={(e) => {
@@ -1685,6 +2004,10 @@ export function App() {
                 >
                   <span>{isAiThinking ? '...' : 'Send'}</span>
                 </button>
+              </div>
+              <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 5, display: 'flex', alignItems: 'center', gap: 4 }}>
+                <span style={{ color: '#34d399' }}>🔒</span>
+                <span>Formatting rules strictly fix Item Name, Category, and UPC only. Pricing is 100% protected.</span>
               </div>
             </div>
           </aside>
@@ -1942,6 +2265,426 @@ export function App() {
               >
                 Close Preview
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Avery Label Sheet Studio Modal */}
+      {isAveryModalOpen && (
+        <div className="avery-modal-overlay avery-print-root" role="dialog" aria-modal="true" aria-labelledby="avery-modal-heading">
+          <div className="avery-modal-container">
+            {/* Modal Header */}
+            <div className="avery-header">
+              <div className="avery-header-title">
+                <span style={{ fontSize: 24 }}>🏷️</span>
+                <div>
+                  <h2 id="avery-modal-heading">Avery Price Tag &amp; Shelf Label Studio</h2>
+                  <div style={{ fontSize: 12, color: '#94a3b8', display: 'flex', gap: 10, alignItems: 'center', marginTop: 2 }}>
+                    <span>Template: <strong style={{ color: '#e2e8f0' }}>{selectedTemplate.code}</strong></span>
+                    <span>•</span>
+                    <span>{averyItemsToPrint.length} items ({averyPagination.totalLabels} labels on {averyPagination.totalPages} sheets)</span>
+                    <span>•</span>
+                    <span style={{ color: '#86efac' }}>✓ High-contrast Code128 vector barcodes</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex-wrap" style={{ gap: 8 }}>
+                <button
+                  type="button"
+                  className="btn-toast"
+                  style={{ background: '#7c3aed', padding: '8px 16px', fontWeight: 600 }}
+                  onClick={handlePrintAverySheets}
+                >
+                  🖨️ Print Sheets / Save as PDF
+                </button>
+                <button
+                  type="button"
+                  className="btn-outline btn-sm"
+                  onClick={handleExportAveryCsvFile}
+                  title="Export CSV formatted for upload into Avery Design & Print Online (avery.com/print)"
+                >
+                  📥 Export Avery CSV
+                </button>
+                <button
+                  type="button"
+                  className="btn-secondary btn-sm"
+                  onClick={() => setIsAveryModalOpen(false)}
+                >
+                  ✕ Close
+                </button>
+              </div>
+            </div>
+
+            {/* Modal Body: Left Controls Sidebar & Right Sheet Preview */}
+            <div className="avery-body-layout">
+              {/* Left Control Sidebar */}
+              <aside className="avery-sidebar">
+                {/* 1. Template Selector */}
+                <div className="avery-control-card">
+                  <label className="avery-control-label">
+                    <span>1. Avery Sheet Template</span>
+                    <span className="avery-filter-badge">{selectedTemplate.labelsPerSheet} / sheet</span>
+                  </label>
+                  <select
+                    className="avery-select"
+                    value={averyTemplateId}
+                    onChange={(e) => {
+                      setAveryTemplateId(e.target.value);
+                      setAveryStartPosition(1);
+                    }}
+                  >
+                    {AVERY_TEMPLATES.map((tmpl) => (
+                      <option key={tmpl.id} value={tmpl.id}>
+                        {tmpl.name} ({tmpl.code})
+                      </option>
+                    ))}
+                  </select>
+                  <div style={{ fontSize: 11, color: '#94a3b8' }}>
+                    {selectedTemplate.description}
+                  </div>
+                </div>
+
+                {/* 2. Brand & Category Filters */}
+                <div className="avery-control-card">
+                  <label className="avery-control-label">
+                    <span>2. Filter by Brand &amp; Category</span>
+                  </label>
+
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    <div>
+                      <div style={{ fontSize: 11, color: '#cbd5e1', marginBottom: 3 }}>Brand:</div>
+                      <select
+                        className="avery-select"
+                        value={averyBrandFilter}
+                        onChange={(e) => setAveryBrandFilter(e.target.value)}
+                      >
+                        <option value="all">All Brands ({averyAvailableBrands.length})</option>
+                        {averyAvailableBrands.map((b) => (
+                          <option key={b} value={b}>
+                            {b}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <div style={{ fontSize: 11, color: '#cbd5e1', marginBottom: 3 }}>Category:</div>
+                      <select
+                        className="avery-select"
+                        value={averyCategoryFilter}
+                        onChange={(e) => setAveryCategoryFilter(e.target.value)}
+                      >
+                        <option value="all">All Categories ({averyAvailableCategories.length})</option>
+                        {averyAvailableCategories.map((c) => (
+                          <option key={c} value={c}>
+                            {c}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <div style={{ fontSize: 11, color: '#cbd5e1', marginBottom: 3 }}>Search Items:</div>
+                      <input
+                        type="search"
+                        className="avery-input"
+                        placeholder="Search product name or UPC…"
+                        value={averySearch}
+                        onChange={(e) => setAverySearch(e.target.value)}
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* 3. Items Selection List */}
+                <div className="avery-control-card">
+                  <div className="avery-control-label">
+                    <span>3. Select Items ({averyItemsToPrint.length} of {averyFilteredItems.length})</span>
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      <button
+                        type="button"
+                        style={{ fontSize: 10, background: 'none', border: 'none', color: '#60a5fa', cursor: 'pointer', padding: 0 }}
+                        onClick={handleSelectAllFilteredAvery}
+                      >
+                        Select All
+                      </button>
+                      <span style={{ color: '#475569' }}>|</span>
+                      <button
+                        type="button"
+                        style={{ fontSize: 10, background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', padding: 0 }}
+                        onClick={handleDeselectAllFilteredAvery}
+                      >
+                        None
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="avery-item-list">
+                    {averyFilteredItems.length === 0 ? (
+                      <div style={{ padding: 12, fontSize: 12, color: '#94a3b8', textAlign: 'center' }}>
+                        No items match the current brand/category filter.
+                      </div>
+                    ) : (
+                      averyFilteredItems.map((item) => {
+                        const isSelected = averySelectedIds.has(item.id);
+                        return (
+                          <div
+                            key={item.id}
+                            className={`avery-item-row ${isSelected ? 'selected' : ''}`}
+                            onClick={() => handleToggleAveryItem(item.id)}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              onChange={() => handleToggleAveryItem(item.id)}
+                              onClick={(e) => e.stopPropagation()}
+                            />
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div style={{ fontWeight: 600, color: '#f8fafc', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                {item.name}
+                              </div>
+                              <div style={{ display: 'flex', gap: 6, fontSize: 10, color: '#94a3b8', marginTop: 1 }}>
+                                <span>{item.category}</span>
+                                {item.barcode && <span>• {item.barcode}</span>}
+                              </div>
+                            </div>
+                            <div style={{ fontWeight: 700, color: '#4ade80' }}>
+                              {formatTagPrice(item.price)}
+                            </div>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
+
+                {/* 4. Sheet Layout & Print Options */}
+                <div className="avery-control-card">
+                  <label className="avery-control-label">
+                    <span>4. Sheet &amp; Print Options</span>
+                  </label>
+
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span style={{ fontSize: 12, color: '#cbd5e1' }}>Copies per Item:</span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <button
+                          type="button"
+                          className="btn-outline btn-sm"
+                          style={{ padding: '2px 8px' }}
+                          onClick={() => setAveryCopies((c) => Math.max(1, c - 1))}
+                        >
+                          -
+                        </button>
+                        <span style={{ fontWeight: 700, minWidth: 20, textAlign: 'center' }}>{averyCopies}</span>
+                        <button
+                          type="button"
+                          className="btn-outline btn-sm"
+                          style={{ padding: '2px 8px' }}
+                          onClick={() => setAveryCopies((c) => Math.min(20, c + 1))}
+                        >
+                          +
+                        </button>
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span style={{ fontSize: 12, color: '#cbd5e1' }} title="Skip already used labels on the first sheet">
+                        Start at Slot # (Reuse sheet):
+                      </span>
+                      <select
+                        className="avery-select"
+                        style={{ width: 'auto', padding: '4px 8px' }}
+                        value={averyStartPosition}
+                        onChange={(e) => setAveryStartPosition(parseInt(e.target.value, 10) || 1)}
+                      >
+                        {Array.from({ length: selectedTemplate.labelsPerSheet }, (_, i) => i + 1).map((num) => (
+                          <option key={num} value={num}>
+                            Slot {num} {num === 1 ? '(Top Left)' : ''}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <div style={{ fontSize: 11, color: '#cbd5e1', marginBottom: 3 }}>Store Name / Tag Header:</div>
+                      <input
+                        type="text"
+                        className="avery-input"
+                        value={averyStoreName}
+                        onChange={(e) => setAveryStoreName(e.target.value)}
+                        placeholder="e.g. 777 Liquor Store"
+                      />
+                    </div>
+
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, paddingTop: 4 }}>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: '#cbd5e1', cursor: 'pointer' }}>
+                        <input
+                          type="checkbox"
+                          checked={averyShowBarcode}
+                          onChange={(e) => setAveryShowBarcode(e.target.checked)}
+                        />
+                        <span>Print Scannable Barcode (Code128)</span>
+                      </label>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: '#cbd5e1', cursor: 'pointer' }}>
+                        <input
+                          type="checkbox"
+                          checked={averyShowStoreName}
+                          onChange={(e) => setAveryShowStoreName(e.target.checked)}
+                        />
+                        <span>Show Store Header on Tag</span>
+                      </label>
+                    </div>
+                  </div>
+                </div>
+              </aside>
+
+              {/* Right Live Sheet Preview Area */}
+              <div className="avery-preview-panel">
+                <div style={{ width: '100%', maxWidth: '8.5in', display: 'flex', justifyContent: 'space-between', alignItems: 'center', color: '#94a3b8', fontSize: 12 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span>📄 Sheet Preview:</span>
+                    <strong style={{ color: '#ffffff' }}>
+                      {averyPagination.totalPages === 0 ? '0 Sheets' : `${averyPagination.totalPages} Sheet${averyPagination.totalPages > 1 ? 's' : ''}`}
+                    </strong>
+                    <span>({averyPagination.totalLabels} tags to print)</span>
+                  </div>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <button
+                      type="button"
+                      className="btn-toast btn-sm"
+                      style={{ background: '#7c3aed' }}
+                      onClick={handlePrintAverySheets}
+                    >
+                      🖨️ Print Now
+                    </button>
+                  </div>
+                </div>
+
+                {averyPagination.pages.length === 0 ? (
+                  <div style={{ background: '#1e293b', border: '1px dashed #475569', borderRadius: 12, padding: 48, textAlign: 'center', color: '#94a3b8', maxWidth: 600 }}>
+                    <div style={{ fontSize: 36, marginBottom: 12 }}>🏷️</div>
+                    <h3 style={{ margin: '0 0 8px 0', color: '#ffffff' }}>No Labels to Preview</h3>
+                    <p style={{ margin: 0, fontSize: 13 }}>
+                      Select items from the list on the left to populate your Avery label sheet preview.
+                    </p>
+                  </div>
+                ) : (
+                  averyPagination.pages.map((pageItems, pageIdx) => (
+                    <div key={pageIdx} className="avery-sheet-preview-wrap">
+                      <div
+                        className="avery-sheet"
+                        style={{
+                          width: `${selectedTemplate.sheetWidthIn}in`,
+                          height: `${selectedTemplate.sheetHeightIn}in`,
+                          paddingTop: `${selectedTemplate.topMarginIn}in`,
+                          paddingBottom: `${selectedTemplate.topMarginIn}in`,
+                          paddingLeft: `${selectedTemplate.leftMarginIn}in`,
+                          paddingRight: `${selectedTemplate.leftMarginIn}in`,
+                          boxSizing: 'border-box'
+                        }}
+                      >
+                        <div
+                          style={{
+                            display: 'grid',
+                            gridTemplateColumns: `repeat(${selectedTemplate.columns}, ${selectedTemplate.labelWidthIn}in)`,
+                            gridTemplateRows: `repeat(${selectedTemplate.rows}, ${selectedTemplate.labelHeightIn}in)`,
+                            columnGap: `${selectedTemplate.colGapIn}in`,
+                            rowGap: `${selectedTemplate.rowGapIn}in`,
+                            width: '100%',
+                            height: '100%'
+                          }}
+                        >
+                          {pageItems.map((item, itemIdx) => {
+                            if (!item) {
+                              return (
+                                <div key={itemIdx} className="avery-label-cell blank-slot">
+                                  <span>[Skipped Slot]</span>
+                                </div>
+                              );
+                            }
+
+                            const barcodeSvg = averyShowBarcode && item.barcode
+                              ? generateBarcodeSvg(item.barcode, selectedTemplate.id === '5167' ? 14 : 22)
+                              : '';
+
+                            return (
+                              <div
+                                key={itemIdx}
+                                className="avery-label-cell"
+                                style={{
+                                  padding: selectedTemplate.id === '5167' ? '0.03in' : '0.06in',
+                                }}
+                              >
+                                {/* Header: Store or Category */}
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                  {averyShowStoreName && (
+                                    <div className="avery-tag-store-header">
+                                      {averyStoreName || '777 Liquor Store'}
+                                    </div>
+                                  )}
+                                  {item.category && selectedTemplate.id !== '5167' && (
+                                    <div className="avery-tag-category-pill">
+                                      {item.category}
+                                    </div>
+                                  )}
+                                </div>
+
+                                {/* Title */}
+                                <div
+                                  className="avery-tag-title"
+                                  style={{
+                                    fontSize: selectedTemplate.id === '5167' ? '7pt' : selectedTemplate.id === '5163' ? '12pt' : '8.5pt'
+                                  }}
+                                  title={item.name}
+                                >
+                                  {item.name}
+                                </div>
+
+                                {/* Bottom Row: Price & Barcode */}
+                                <div className="avery-tag-bottom-row">
+                                  <div className="avery-tag-price-block">
+                                    <div
+                                      className="avery-tag-price"
+                                      style={{
+                                        fontSize: selectedTemplate.id === '5167' ? '9pt' : selectedTemplate.id === '5163' ? '18pt' : '13pt'
+                                      }}
+                                    >
+                                      {formatTagPrice(item.price)}
+                                    </div>
+                                    {item.size && selectedTemplate.id !== '5167' && (
+                                      <div style={{ fontSize: '6.5pt', fontWeight: 600, color: '#475569' }}>
+                                        {item.size}
+                                      </div>
+                                    )}
+                                  </div>
+
+                                  {averyShowBarcode && item.barcode && (
+                                    <div className="avery-tag-barcode-wrap">
+                                      <div
+                                        dangerouslySetInnerHTML={{ __html: barcodeSvg }}
+                                        style={{ width: '100%' }}
+                                      />
+                                      <div
+                                        className="avery-tag-barcode-digits"
+                                        style={{ fontSize: selectedTemplate.id === '5167' ? '5.5pt' : '6.5pt' }}
+                                      >
+                                        {item.barcode}
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
             </div>
           </div>
         </div>

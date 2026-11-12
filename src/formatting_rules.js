@@ -87,11 +87,46 @@ export function generateRuleBasedFormatting(prompt, items) {
         });
       }
     }
+
+    // UPC / Barcode standardization if requested
+    if (p.includes('upc') || p.includes('barcode') || p.includes('pad') || p.includes('zero') || p.includes('digit')) {
+      const origBarcode = String(item.barcode || item.barcodeOriginal || '').trim();
+      const digitsOnly = origBarcode.replace(/\D/g, '');
+      if (digitsOnly.length > 0 && digitsOnly !== origBarcode) {
+        changes.push({
+          id: item.id,
+          field: 'barcode',
+          originalValue: origBarcode,
+          proposedValue: digitsOnly,
+          reason: 'Cleaned UPC/barcode by removing non-numeric characters'
+        });
+      } else if (digitsOnly.length >= 10 && digitsOnly.length < 12 && (p.includes('pad') || p.includes('zero') || p.includes('12') || p.includes('upc'))) {
+        const padded = digitsOnly.padStart(12, '0');
+        changes.push({
+          id: item.id,
+          field: 'barcode',
+          originalValue: origBarcode,
+          proposedValue: padded,
+          reason: `Padded ${digitsOnly.length}-digit UPC to standard 12-digit UPC-A with leading zeros`
+        });
+      }
+    }
   }
 
+  // STRICT RULE: Formatting rules MUST ONLY fix Item Name, Category, and UPC.
+  // Formatting rules must NEVER touch pricing under any circumstances.
+  const allowedFields = new Set(['name', 'category', 'barcode']);
+  const safeChanges = changes.filter((c) => allowedFields.has(c.field) && c.field !== 'price');
+
+  const touchesPriceAttempt = p.includes('price') || p.includes('cost') || p.includes('pricing') || p.includes('dollar');
+  const priceNotice = touchesPriceAttempt
+    ? ' (Note: Formatting rules strictly protect store pricing and will never modify prices; rules only fix Item Name, Category, and UPC).'
+    : '';
+
   return {
-    message: `Analyzed items for "${prompt}". Generated ${changes.length} proposed formatting adjustment(s).`,
-    summary: `Identified ${changes.length} adjustment(s) across catalog items.`,
-    changes
+    message: `Analyzed items for "${prompt}". Generated ${safeChanges.length} proposed formatting adjustment(s)${priceNotice}`,
+    summary: `Identified ${safeChanges.length} adjustment(s) across catalog items (Item Name, Category, and UPC only).`,
+    changes: safeChanges
   };
 }
+

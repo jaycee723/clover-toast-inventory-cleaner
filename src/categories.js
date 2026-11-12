@@ -62,6 +62,49 @@ export function isGenericCategory(cat) {
   return false;
 }
 
+/**
+ * Streamlines and simplifies fragmented or noisy categories into clean, standardized Toast retail departments.
+ */
+export function streamlineCategory(category) {
+  const c = collapse(category);
+  if (!c || isGenericCategory(c)) return null;
+
+  if (c.includes('vodka') || c.includes('whiskey') || c.includes('bourbon') || c.includes('rum') || c.includes('tequila') || c.includes('gin') || c.includes('scotch') || c.includes('brandy') || c.includes('cognac') || c.includes('spirits') || c.includes('liquor')) {
+    return 'LIQUOR/SPIRITS';
+  }
+  if (c.includes('beer') || c.includes('ipa') || c.includes('lager') || c.includes('ale') || c.includes('stout') || c.includes('pilsner') || c.includes('cider') || c.includes('malt')) {
+    return 'BEER';
+  }
+  if (c.includes('wine') || c.includes('chardonnay') || c.includes('cabernet') || c.includes('pinot') || c.includes('merlot') || c.includes('prosecco') || c.includes('champagne') || c.includes('rosé') || c.includes('rose') || c.includes('sauvignon') || c.includes('zinfandel')) {
+    return 'WINE';
+  }
+  if (c.includes('rtd') || c.includes('ready to drink') || c.includes('hard tea') || c.includes('hard seltzer') || c.includes('cocktails') || c.includes('seltzer')) {
+    return 'RTD (READY TO DRINK)';
+  }
+  if (c.includes('candy') || c.includes('snack') || c.includes('chip') || c.includes('chocolate') || c.includes('cookie') || c.includes('gum') || c.includes('jerky') || c.includes('cracker') || c.includes('nuts')) {
+    return 'CANDY/SNACKS';
+  }
+  if (c.includes('drink') || c.includes('beverage') || c.includes('soda') || c.includes('juice') || c.includes('water') || c.includes('energy') || c.includes('tea') || c.includes('coffee') || c.includes('mixer')) {
+    return 'DRINKS';
+  }
+  if (c.includes('tobacco') || c.includes('cigarette') || c.includes('cigar') || c.includes('chew') || c.includes('snuff')) {
+    return 'TOBACCO PRODUCTS';
+  }
+  if (c.includes('vape') || c.includes('e-cig') || c.includes('disposable') || c.includes('pod') || c.includes('e-liquid')) {
+    return 'VAPES';
+  }
+  if (c.includes('smoke') || c.includes('lighter') || c.includes('paper') || c.includes('pipe') || c.includes('paraphernalia')) {
+    return 'Smoke Shop';
+  }
+  if (c.includes('thca') || c.includes('cbd') || c.includes('hemp') || c.includes('delta')) {
+    return 'HEMP/THCA';
+  }
+  if (c.includes('kratom') || c.includes('kava')) {
+    return 'KAVA/KRATOM';
+  }
+  return category;
+}
+
 const STOP_WORDS = new Set([
   'and', '&', 'of', 'the', 'with', 'in', 'for', 'a', 'an', 'to', 'by', 'at', 'on',
   'pack', 'pk', 'pck', 'count', 'ct', 'case', 'cs', 'btl', 'bottle', 'bottles', 'can', 'cans',

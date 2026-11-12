@@ -35,7 +35,53 @@ const SPECIAL_BRANDS = new Map([
   ['ELF BAR', 'Elf Bar'],
   ['LOST MARY', 'Lost Mary'],
   ['PUFF BAR', 'Puff Bar'],
-  ['KANVA BOTANICALS', 'Kanva Botanicals']
+  ['KANVA BOTANICALS', 'Kanva Botanicals'],
+  ['KANVA', 'Kanva'],
+  ['TITOS', "Tito's"],
+  ["TITO'S", "Tito's"],
+  ["TITO'S HANDMADE VODKA", "Tito's Handmade Vodka"],
+  ['TITOS HANDMADE VODKA', "Tito's Handmade Vodka"],
+  ['CORONA EXTRA', 'Corona Extra'],
+  ['CORONA LIGHT', 'Corona Light'],
+  ['MODELO ESPECIAL', 'Modelo Especial'],
+  ['BUD LIGHT', 'Bud Light'],
+  ['BUDWEISER', 'Budweiser'],
+  ['COORS LIGHT', 'Coors Light'],
+  ['MILLER LITE', 'Miller Lite'],
+  ['HEINEKEN', 'Heineken'],
+  ['GUINNESS', 'Guinness'],
+  ['HENNESSY', 'Hennessy'],
+  ['JAMESON', 'Jameson'],
+  ['CROWN ROYAL', 'Crown Royal'],
+  ['SMIRNOFF', 'Smirnoff'],
+  ['ABSOLUT', 'Absolut'],
+  ['PATRON', 'Patrón'],
+  ['PATRÓN', 'Patrón'],
+  ['CAPTAIN MORGAN', 'Captain Morgan'],
+  ['BACARDI', 'Bacardi'],
+  ['FIREBALL', 'Fireball'],
+  ['BAILEYS', 'Baileys'],
+  ['JAGERMEISTER', 'Jägermeister'],
+  ['JÄGERMEISTER', 'Jägermeister'],
+  ['TRULY', 'Truly'],
+  ['ANGRY ORCHARD', 'Angry Orchard'],
+  ['MONSTER ENERGY', 'Monster Energy'],
+  ['CELSIUS', 'Celsius'],
+  ['GATORADE', 'Gatorade'],
+  ['PEPSI', 'Pepsi'],
+  ['SPRITE', 'Sprite'],
+  ['DORITOS', 'Doritos'],
+  ['LAYS', "Lay's"],
+  ["LAY'S", "Lay's"],
+  ['CHEETOS', 'Cheetos'],
+  ['TOSTITOS', 'Tostitos'],
+  ['PRINGLES', 'Pringles'],
+  ['MARLBORO', 'Marlboro'],
+  ['NEWPORT', 'Newport'],
+  ['CAMEL', 'Camel'],
+  ['ZYN', 'Zyn'],
+  ['VOODOO RANGER', 'Voodoo Ranger'],
+  ['SIERRA NEVADA', 'Sierra Nevada']
 ]);
 
 export function normalizeUnits(s) {
@@ -83,6 +129,16 @@ export function normalizeName(raw) {
   if (single) {
     s = s.split(' ').map((w, i) => (/^(mL|L|oz|fl|Pack|Count)$/.test(w) ? w : titleToken(w, i === 0))).join(' ');
   }
+
+  // Uniform brand name capitalization for known brands within composite names
+  for (const [bUpper, bProper] of SPECIAL_BRANDS.entries()) {
+    if (bUpper.length > 3) {
+      const esc = bUpper.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const re = new RegExp(`(^|[\\s,;()/\\[\\]-])${esc}(?=[\\s,;()/\\[\\]-]|$|')`, 'gi');
+      s = s.replace(re, (m, p1) => `${p1}${bProper}`);
+    }
+  }
+
   return s;
 }
 

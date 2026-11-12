@@ -1,6 +1,0 @@
-{
-  "summary":  "Updated implementation plan incorporating confidence-tiered edit flagging for low-certainty proposals, individual row edit/revert controls, and global remove/reset capabilities in Step 3 alongside 1-click auto-fix and approve-all actions.",
-  "updatedAt":  "2026-10-25T21:56:40.331866460Z",
-  "requestFeedback":  true,
-  "userFacing":  true
-}

@@ -27,7 +27,10 @@ export function computeDiffPreview(rows = [], changes = []) {
   if (!Array.isArray(changes)) return [];
   const rowMap = new Map(rows.map((r) => [r.id, r]));
 
-  return changes.map((ch, idx) => {
+  // Strictly filter out any price changes; formatting rules only touch name, category, and barcode
+  const allowed = changes.filter((ch) => ch && (ch.field === 'name' || ch.field === 'category' || ch.field === 'barcode') && ch.field !== 'price');
+
+  return allowed.map((ch, idx) => {
     const row = rowMap.get(ch.id);
     const itemName = row ? (row.current_name || row.original_name) : `Item ${ch.id}`;
     return {
@@ -66,6 +69,11 @@ export function applyAiChanges(records = [], rows = [], changes = []) {
     const rec = records[index];
     const field = ch.field;
     const proposed = ch.proposedValue;
+
+    // STRICT POLICY: Formatting rules must NEVER touch pricing. Only fix name, category, and barcode.
+    if (field !== 'name' && field !== 'category' && field !== 'barcode') {
+      continue;
+    }
 
     if (field === 'name') {
       undoSnapshot.changes.push({
@@ -110,17 +118,6 @@ export function applyAiChanges(records = [], rows = [], changes = []) {
       if (rec) rec.barcode = proposed;
       row.barcode = analyzeBarcode(proposed);
       row.decisions.barcode = 'accept';
-      affectedSet.add(row.id);
-    } else if (field === 'price') {
-      undoSnapshot.changes.push({
-        id: row.id,
-        index,
-        field: 'price',
-        previousRec: rec?.price,
-        previousPrice: row.price
-      });
-      if (rec) rec.price = proposed;
-      row.price = proposed;
       affectedSet.add(row.id);
     }
   }
@@ -187,6 +184,11 @@ export function applySingleAiChange(records = [], rows = [], change) {
   const field = change.field || 'name';
   const proposed = change.proposedValue;
 
+  // STRICT POLICY: Formatting rules must NEVER touch pricing. Only fix name, category, and barcode.
+  if (field !== 'name' && field !== 'category' && field !== 'barcode') {
+    return { success: false, undoRecord: null, error: 'Formatting rules strictly protect pricing and only fix Item Name, Category, and UPC.' };
+  }
+
   let undoRecord = {
     id: row.id,
     index: rowIndex,
@@ -217,11 +219,6 @@ export function applySingleAiChange(records = [], rows = [], change) {
     if (rec) rec.barcode = proposed;
     row.barcode = analyzeBarcode(proposed);
     row.decisions.barcode = 'accept';
-  } else if (field === 'price') {
-    undoRecord.previousRec = rec?.price;
-    undoRecord.previousPrice = row.price;
-    if (rec) rec.price = proposed;
-    row.price = proposed;
   }
 
   row.manuallyEdited = true;

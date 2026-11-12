@@ -19,7 +19,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
+          cache: 'npm'
+      - run: npm ci
       - run: npm test
+      - run: npm run lint
+      - run: npm run build
   deploy:
     if: github.ref == 'refs/heads/main'
     needs: test
@@ -29,10 +33,15 @@ jobs:
       url: ${{ steps.deploy.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
-      - run: mkdir site && cp index.html style.css app.js site/ && cp -r src site/src
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - run: npm ci
+      - run: npm run build
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: site
+          path: dist
       - id: deploy
         uses: actions/deploy-pages@v4
